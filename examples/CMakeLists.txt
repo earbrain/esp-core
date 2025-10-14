@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/..")
 
-# Select which example to build (default: wifi)
+# Select which example to build (default: wifi_ap)
 if(NOT EXAMPLE)
-    set(EXAMPLE "wifi")
+    set(EXAMPLE "wifi_ap")
 endif()
 
 # Validate EXAMPLE value
-set(VALID_EXAMPLES wifi smartconfig logging metrics tasks)
+set(VALID_EXAMPLES wifi_ap wifi_sta mdns smartconfig logging metrics tasks)
 if(NOT EXAMPLE IN_LIST VALID_EXAMPLES)
     message(FATAL_ERROR "Invalid EXAMPLE value: ${EXAMPLE}. Valid values are: ${VALID_EXAMPLES}")
 endif()

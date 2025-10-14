@@ -5,13 +5,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "wifi_example";
+static const char *TAG = "mdns_example";
 
 extern "C" void app_main(void) {
-  earbrain::logging::info("=== WiFi & mDNS Service Demo ===", TAG);
+  earbrain::logging::info("=== mDNS Service Demo ===", TAG);
 
+  // Start WiFi in AP mode (mDNS needs network interface)
+  earbrain::logging::info("Starting WiFi AP (required for mDNS)...", TAG);
   earbrain::AccessPointConfig ap_config;
-  ap_config.ssid = "esp-core-demo";
+  ap_config.ssid = "esp-core-mdns";
   ap_config.channel = 6;
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
@@ -22,27 +24,12 @@ extern "C" void app_main(void) {
     return;
   }
 
-  earbrain::logging::infof(TAG, "AP started: %s", ap_config.ssid.c_str());
+  earbrain::logging::info("AP started successfully!", TAG);
 
   vTaskDelay(pdMS_TO_TICKS(2000));
 
-  auto status = earbrain::wifi().status();
-  earbrain::logging::infof(TAG, "AP active: %s, STA active: %s",
-                                 status.ap_active ? "Yes" : "No",
-                                 status.sta_active ? "Yes" : "No");
-
-  earbrain::logging::info("Performing WiFi scan...", TAG);
-  auto scan_result = earbrain::wifi().perform_scan();
-
-  if (scan_result.error == ESP_OK) {
-    earbrain::logging::infof(TAG, "Found %zu networks", scan_result.networks.size());
-    for (size_t i = 0; i < scan_result.networks.size() && i < 5; i++) {
-      const auto &net = scan_result.networks[i];
-      earbrain::logging::infof(TAG, "  %s (Signal: %d%%)", net.ssid.c_str(), net.signal);
-    }
-  }
-
   // Start mDNS service
+  earbrain::logging::info("", TAG);
   earbrain::logging::info("Starting mDNS service...", TAG);
   earbrain::MdnsConfig mdns_config;
   mdns_config.hostname = "esp-core-device";
@@ -55,15 +42,23 @@ extern "C" void app_main(void) {
 
   if (err == ESP_OK) {
     earbrain::logging::info("mDNS started successfully!", TAG);
-    earbrain::logging::infof(TAG, "Discoverable as: %s.local", mdns_config.hostname.c_str());
-    earbrain::logging::infof(TAG, "Service: %s%s:%u",
+    earbrain::logging::info("", TAG);
+    earbrain::logging::info("Device is now discoverable as:", TAG);
+    earbrain::logging::infof(TAG, "  Hostname: %s.local", mdns_config.hostname.c_str());
+    earbrain::logging::infof(TAG, "  Service: %s%s:%u",
                                    mdns_config.service_type.c_str(),
                                    mdns_config.protocol.c_str(),
                                    mdns_config.port);
+    earbrain::logging::info("", TAG);
+    earbrain::logging::info("You can discover this device using:", TAG);
+    earbrain::logging::info("  - macOS/Linux: dns-sd -B _http._tcp", TAG);
+    earbrain::logging::info("  - iOS: Download Discovery - DNS-SD Browser app", TAG);
+    earbrain::logging::info("  - Android: Download BonjourBrowser app", TAG);
   } else {
     earbrain::logging::errorf(TAG, "Failed to start mDNS: %s", esp_err_to_name(err));
   }
 
+  earbrain::logging::info("", TAG);
   earbrain::logging::info("Demo completed. Running idle loop...", TAG);
 
   while (true) {
