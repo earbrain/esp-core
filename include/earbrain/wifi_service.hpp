@@ -94,7 +94,6 @@ private:
   bool initialized;
   bool handlers_registered;
   std::atomic<bool> sta_connected;
-  std::atomic<int> sta_retry_count;
   std::atomic<bool> sta_manual_disconnect;
   std::atomic<esp_ip4_addr_t> sta_ip;
   std::atomic<wifi_err_reason_t> sta_last_disconnect_reason;

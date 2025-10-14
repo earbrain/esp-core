@@ -14,7 +14,6 @@
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_smartconfig.h"
-#include "esp_task_wdt.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
@@ -30,11 +29,6 @@ namespace {
 constexpr const char wifi_tag[] = "wifi";
 
 constexpr uint8_t sta_listen_interval = 1;
-constexpr int8_t sta_tx_power_qdbm = 78;
-constexpr int sta_max_connect_retries = 5;
-constexpr uint32_t sta_connection_timeout_ms = 15000;
-constexpr uint32_t sta_connection_check_interval_ms = 500;
-
 int signal_quality_from_rssi(int32_t rssi) {
   if (rssi <= -100) {
     return 0;
@@ -96,7 +90,7 @@ wifi_config_t make_sta_config(const StationConfig &config) {
 WifiService::WifiService()
     : softap_netif(nullptr), sta_netif(nullptr), ap_config{}, sta_config{},
       initialized(false), handlers_registered(false), sta_connected(false),
-      sta_retry_count(0), sta_manual_disconnect(false), sta_ip{},
+      sta_manual_disconnect(false), sta_ip{},
       sta_last_disconnect_reason(WIFI_REASON_UNSPECIFIED),
       sta_last_error(ESP_OK), smartconfig_active(false),
       smartconfig_done(false) {}
@@ -218,7 +212,6 @@ esp_err_t WifiService::start_wifi_sta_mode() {
 
 void WifiService::reset_sta_state() {
   sta_connected = false;
-  sta_retry_count = 0;
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
@@ -265,7 +258,6 @@ esp_err_t WifiService::start_access_point(const AccessPointConfig &config) {
 
   ap_config = config;
   sta_connected = false;
-  sta_retry_count = 0;
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
@@ -342,7 +334,6 @@ esp_err_t WifiService::stop_station() {
   }
 
   sta_connected = false;
-  sta_retry_count = 0;
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
@@ -406,7 +397,6 @@ esp_err_t WifiService::try_connect(const StationConfig &config) {
 
   sta_config = config;
   sta_connected = false;
-  sta_retry_count = 0;
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
@@ -594,7 +584,6 @@ void WifiService::wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 void WifiService::on_sta_got_ip(const ip_event_got_ip_t &event) {
   sta_connected = true;
-  sta_retry_count = 0;
   sta_last_error = ESP_OK;
   sta_ip.store(event.ip_info.ip);
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
