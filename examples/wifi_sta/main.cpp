@@ -3,6 +3,8 @@
 #include "earbrain/wifi_service.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#include <cstring>
 
 static const char *TAG = "wifi_sta_example";
 
@@ -18,6 +20,39 @@ extern "C" void app_main(void) {
   }
 
   earbrain::logging::info("Station mode started successfully!", TAG);
+
+  // Save and connect to WiFi if credentials are provided
+#if defined(CONFIG_WIFI_SSID) && defined(CONFIG_WIFI_PASSWORD)
+  const char* ssid = CONFIG_WIFI_SSID;
+  const char* password = CONFIG_WIFI_PASSWORD;
+
+  if (strlen(ssid) > 0) {
+    earbrain::logging::info("", TAG);
+    earbrain::logging::infof(TAG, "Saving WiFi credentials to NVS: %s", ssid);
+
+    // Save credentials to NVS
+    err = earbrain::wifi().save_credentials(ssid, password);
+    if (err == ESP_OK) {
+      earbrain::logging::info("Credentials saved successfully!", TAG);
+    } else {
+      earbrain::logging::errorf(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
+    }
+
+    // Connect using saved credentials
+    earbrain::logging::infof(TAG, "Connecting to WiFi: %s", ssid);
+    err = earbrain::wifi().connect();
+
+    if (err == ESP_OK) {
+      earbrain::logging::info("WiFi connection initiated successfully!", TAG);
+    } else {
+      earbrain::logging::errorf(TAG, "Failed to initiate connection: %s", esp_err_to_name(err));
+    }
+  } else {
+    earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
+  }
+#else
+  earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
+#endif
 
   vTaskDelay(pdMS_TO_TICKS(1000));
 

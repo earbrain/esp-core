@@ -1,0 +1,13 @@
+# Local configuration with credentials
+sdkconfig.local
+
+# Build directories
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
