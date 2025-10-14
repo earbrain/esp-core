@@ -8,7 +8,7 @@ if(NOT EXAMPLE)
 endif()
 
 # Validate EXAMPLE value
-set(VALID_EXAMPLES wifi_ap wifi_sta wifi_scan mdns smartconfig logging metrics tasks)
+set(VALID_EXAMPLES wifi_ap wifi_sta wifi_scan wifi_test mdns smartconfig logging metrics tasks)
 if(NOT EXAMPLE IN_LIST VALID_EXAMPLES)
     message(FATAL_ERROR "Invalid EXAMPLE value: ${EXAMPLE}. Valid values are: ${VALID_EXAMPLES}")
 endif()

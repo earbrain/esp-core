@@ -62,18 +62,6 @@ enum class WifiMode {
   APSTA
 };
 
-enum class WifiState {
-  Uninitialized,
-  Idle,
-  Connecting,
-  Connected,
-  ApstaActive,
-  ApstaStaConnected,
-  ProvListening,
-  ProvConnecting,
-  ProvAck
-};
-
 enum class ProvisionMode {
   SmartConfig,
   SoftAP
@@ -90,8 +78,11 @@ enum class WifiEvent {
 };
 
 struct WifiEventData {
-  WifiState state;
   WifiEvent event;
+  WifiMode mode = WifiMode::Off;
+  bool sta_connected = false;
+  bool sta_connecting = false;
+  bool provisioning_active = false;
   esp_err_t error_code = ESP_OK;
   std::optional<esp_ip4_addr_t> ip_address;
   std::optional<wifi_err_reason_t> disconnect_reason;
@@ -100,8 +91,8 @@ struct WifiEventData {
 
 struct WifiStatus {
   WifiMode mode = WifiMode::Off;
-  WifiState state = WifiState::Uninitialized;
   bool sta_connected = false;
+  bool sta_connecting = false;
   bool provisioning_active = false;
   esp_ip4_addr_t sta_ip{};
   wifi_err_reason_t sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
@@ -124,7 +115,7 @@ public:
 
   // Configuration management
   WifiConfig config() const;
-  esp_err_t set_config(const WifiConfig &config);
+  esp_err_t config(const WifiConfig &config);
 
   esp_err_t connect(const WifiCredentials &creds);
   esp_err_t connect();
@@ -137,7 +128,6 @@ public:
   WifiScanResult perform_scan() const;
   WifiStatus status() const;
 
-  WifiState state() const { return current_state; }
   WifiMode mode() const { return current_mode; }
   void on(EventListener listener);
 
@@ -157,7 +147,6 @@ private:
   void on_sta_disconnected(const wifi_event_sta_disconnected_t &event);
   void on_provisioning_done(void *event_data);
 
-  void transition_to(WifiState new_state);
   void emit(const WifiEventData &data) const;
   void emit_connection_failed(esp_err_t error);
 
@@ -170,6 +159,7 @@ private:
   bool initialized;
   bool handlers_registered;
   std::atomic<bool> sta_connected;
+  std::atomic<bool> sta_connecting;
   std::atomic<bool> sta_manual_disconnect;
   std::atomic<esp_ip4_addr_t> sta_ip;
   std::atomic<wifi_err_reason_t> sta_last_disconnect_reason;
@@ -177,14 +167,15 @@ private:
   std::atomic<bool> provisioning_active;
 
   WifiMode current_mode;
-  WifiState current_state;
   ProvisionMode current_provisioning_mode;
   std::vector<EventListener> listeners;
 };
 
 WifiService &wifi();
 
-// Helper function to convert esp_ip4_addr_t to string
+// Helper functions to convert enums and IP to string
 std::string ip_to_string(const esp_ip4_addr_t &ip);
+const char* wifi_event_to_string(WifiEvent event);
+const char* wifi_mode_to_string(WifiMode mode);
 
 } // namespace earbrain

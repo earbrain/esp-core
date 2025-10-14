@@ -17,7 +17,7 @@ extern "C" void app_main(void) {
   auto config = earbrain::wifi().config();
   config.ap_config = ap_config;
 
-  esp_err_t err = earbrain::wifi().set_config(config);
+  esp_err_t err = earbrain::wifi().config(config);
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
     return;
@@ -39,7 +39,7 @@ extern "C" void app_main(void) {
                          (status.mode == earbrain::WifiMode::APSTA) ? "APSTA" :
                          (status.mode == earbrain::WifiMode::STA) ? "STA" : "Off";
   earbrain::logging::infof(TAG, "WiFi Mode: %s", mode_str);
-  earbrain::logging::infof(TAG, "State: %d", static_cast<int>(status.state));
+  earbrain::logging::infof(TAG, "Provisioning: %s", status.provisioning_active ? "Active" : "Inactive");
 
   earbrain::logging::info("", TAG);
   earbrain::logging::info("Access Point is running. Connect to it using:", TAG);

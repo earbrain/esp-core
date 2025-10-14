@@ -7,6 +7,7 @@
 ./run.sh wifi_ap
 ./run.sh wifi_sta
 ./run.sh wifi_scan
+./run.sh wifi_test
 ./run.sh mdns
 ./run.sh smartconfig
 ./run.sh logging
@@ -19,6 +20,7 @@
 - **wifi_ap**: WiFi access point mode demonstration
 - **wifi_sta**: WiFi station mode (connect using credentials from sdkconfig)
 - **wifi_scan**: Scan available Wi-Fi networks without connecting
+- **wifi_test**: Comprehensive WiFi state transition and error handling test suite
 - **mdns**: mDNS service for device discovery
 - **smartconfig**: WiFi provisioning via smartphone app (ESPTouch)
 - **logging**: Logging system with formatted output

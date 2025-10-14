@@ -102,11 +102,10 @@ esp_err_t validate_station_config(const WifiCredentials &creds) {
 WifiService::WifiService()
     : softap_netif(nullptr), sta_netif(nullptr), wifi_config{}, credentials{},
       initialized(false), handlers_registered(false), sta_connected(false),
-      sta_manual_disconnect(false), sta_ip{},
+      sta_connecting(false), sta_manual_disconnect(false), sta_ip{},
       sta_last_disconnect_reason(WIFI_REASON_UNSPECIFIED),
       sta_last_error(ESP_OK), provisioning_active(false),
       current_mode(WifiMode::Off),
-      current_state(WifiState::Uninitialized),
       current_provisioning_mode(ProvisionMode::SmartConfig) {}
 
 esp_err_t WifiService::ensure_initialized() {
@@ -253,7 +252,7 @@ esp_err_t WifiService::mode(WifiMode new_mode) {
   }
 
   // Avoid unnecessary restart if already in the requested mode
-  if (current_mode == new_mode && current_state != WifiState::Uninitialized) {
+  if (current_mode == new_mode && initialized) {
     logging::infof(wifi_tag, "WiFi mode unchanged: %d", static_cast<int>(new_mode));
     return ESP_OK;
   }
@@ -270,7 +269,6 @@ esp_err_t WifiService::mode(WifiMode new_mode) {
   if (native_mode == WIFI_MODE_NULL) {
     logging::warn("Requested start with WifiMode::Off; stopping WiFi instead", wifi_tag);
     current_mode = WifiMode::Off;
-    transition_to(WifiState::Idle);
     return ESP_OK;
   }
 
@@ -300,15 +298,12 @@ esp_err_t WifiService::mode(WifiMode new_mode) {
 
   if (native_mode == WIFI_MODE_APSTA) {
     current_mode = WifiMode::APSTA;
-    transition_to(WifiState::ApstaActive);
     logging::infof(wifi_tag, "APSTA mode started: %s", wifi_config.ap_config.ssid.c_str());
   } else if (native_mode == WIFI_MODE_AP) {
     current_mode = WifiMode::AP;
-    transition_to(WifiState::Idle);
     logging::infof(wifi_tag, "AP mode started: %s", wifi_config.ap_config.ssid.c_str());
   } else {
     current_mode = WifiMode::STA;
-    transition_to(WifiState::Idle);
     logging::info("STA mode started", wifi_tag);
 
     auto saved_credentials = load_credentials();
@@ -325,7 +320,7 @@ WifiConfig WifiService::config() const {
   return wifi_config;
 }
 
-esp_err_t WifiService::set_config(const WifiConfig &config) {
+esp_err_t WifiService::config(const WifiConfig &config) {
   if (!validation::is_valid_ssid(config.ap_config.ssid)) {
     logging::error("Invalid AP SSID", wifi_tag);
     return ESP_ERR_INVALID_ARG;
@@ -363,12 +358,7 @@ esp_err_t WifiService::connect(const WifiCredentials &creds) {
     return ESP_ERR_INVALID_STATE;
   }
 
-  if (mode == WIFI_MODE_APSTA) {
-    transition_to(WifiState::ApstaActive);
-  } else {
-    transition_to(WifiState::Connecting);
-  }
-
+  sta_connecting.store(true);
   sta_manual_disconnect.store(true);
   esp_err_t disconnect_err = esp_wifi_disconnect();
   if (disconnect_err != ESP_OK) {
@@ -542,18 +532,19 @@ void WifiService::on_sta_got_ip(const ip_event_got_ip_t &event) {
   sta_ip.store(event.ip_info.ip);
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
 
-  if (current_state == WifiState::Connecting) {
-    transition_to(WifiState::Connected);
-  } else if (current_state == WifiState::ApstaActive) {
-    transition_to(WifiState::ApstaStaConnected);
-  } else if (current_state == WifiState::ProvConnecting) {
+  if (sta_connecting.load()) {
+    sta_connecting.store(false);
+
     if (provisioning_active.load() && temp_provisioning_credentials.has_value()) {
       esp_err_t err = save_credentials(temp_provisioning_credentials->ssid,
                                        temp_provisioning_credentials->passphrase);
 
       if (err == ESP_OK) {
         WifiEventData event_data{};
-        event_data.state = current_state;
+        event_data.mode = current_mode;
+        event_data.sta_connected = sta_connected.load();
+        event_data.sta_connecting = sta_connecting.load();
+        event_data.provisioning_active = provisioning_active.load();
         event_data.event = WifiEvent::ProvisioningCompleted;
         event_data.credentials = temp_provisioning_credentials;
         event_data.ip_address = event.ip_info.ip;
@@ -574,7 +565,10 @@ void WifiService::on_sta_got_ip(const ip_event_got_ip_t &event) {
   }
 
   WifiEventData event_data{};
-  event_data.state = current_state;
+  event_data.mode = current_mode;
+  event_data.sta_connected = sta_connected.load();
+  event_data.sta_connecting = sta_connecting.load();
+  event_data.provisioning_active = provisioning_active.load();
   event_data.event = WifiEvent::Connected;
   event_data.ip_address = event.ip_info.ip;
   emit(event_data);
@@ -598,11 +592,8 @@ void WifiService::on_sta_disconnected(
 
   sta_last_disconnect_reason = static_cast<wifi_err_reason_t>(event.reason);
 
-  if (current_state == WifiState::Connected) {
-    transition_to(WifiState::Idle);
-  } else if (current_state == WifiState::ApstaStaConnected) {
-    transition_to(WifiState::ApstaActive);
-  } else if (current_state == WifiState::Connecting) {
+  if (sta_connecting.load()) {
+    sta_connecting.store(false);
     esp_err_t error = ESP_FAIL;
     switch (sta_last_disconnect_reason) {
     case WIFI_REASON_AUTH_FAIL:
@@ -624,7 +615,10 @@ void WifiService::on_sta_disconnected(
   }
 
   WifiEventData event_data{};
-  event_data.state = current_state;
+  event_data.mode = current_mode;
+  event_data.sta_connected = sta_connected.load();
+  event_data.sta_connecting = sta_connecting.load();
+  event_data.provisioning_active = provisioning_active.load();
   event_data.event = WifiEvent::Disconnected;
   event_data.disconnect_reason = static_cast<wifi_err_reason_t>(event.reason);
   emit(event_data);
@@ -713,12 +707,12 @@ WifiScanResult WifiService::perform_scan() const {
 WifiStatus WifiService::status() const {
   WifiStatus s;
   s.mode = current_mode;
-  s.state = current_state;
   s.sta_connected = sta_connected.load();
+  s.sta_connecting = sta_connecting.load();
+  s.provisioning_active = provisioning_active.load();
   s.sta_ip = sta_ip.load();
   s.sta_last_disconnect_reason = sta_last_disconnect_reason.load();
   s.sta_last_error = sta_last_error.load();
-  s.provisioning_active = provisioning_active.load();
   return s;
 }
 
@@ -738,7 +732,6 @@ esp_err_t WifiService::start_provisioning(ProvisionMode mode, const Provisioning
       return err;
     }
 
-    transition_to(WifiState::ProvListening);
     logging::info("WiFi started for SmartConfig provisioning", wifi_tag);
 
     err = esp_event_handler_register(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
@@ -803,7 +796,7 @@ esp_err_t WifiService::start_provisioning(ProvisionMode mode, const Provisioning
 
     WifiConfig updated_config = wifi_config;
     updated_config.ap_config = ap_cfg;
-    esp_err_t err = set_config(updated_config);
+    esp_err_t err = config(updated_config);
     if (err != ESP_OK) {
       return err;
     }
@@ -813,7 +806,6 @@ esp_err_t WifiService::start_provisioning(ProvisionMode mode, const Provisioning
       return err;
     }
 
-    transition_to(WifiState::ProvListening);
     provisioning_active.store(true);
     logging::info("SoftAP provisioning started", wifi_tag);
     return ESP_OK;
@@ -842,7 +834,6 @@ esp_err_t WifiService::cancel_provisioning() {
   }
 
   provisioning_active.store(false);
-  transition_to(WifiState::Idle);
   logging::info("Provisioning cancelled", wifi_tag);
   return ESP_OK;
 }
@@ -867,7 +858,6 @@ void WifiService::provisioning_event_handler(void *arg,
     }
     break;
   case SC_EVENT_SEND_ACK_DONE:
-    wifi->transition_to(WifiState::ProvAck);
     logging::info("Provisioning ACK sent to phone", wifi_tag);
     if (wifi->current_provisioning_mode == ProvisionMode::SmartConfig) {
       esp_err_t stop_err = esp_smartconfig_stop();
@@ -912,23 +902,29 @@ void WifiService::on_provisioning_done(void *event_data) {
   if (validation_err != ESP_OK) {
     logging::error("Provisioning provided invalid credentials", wifi_tag);
 
-    WifiEventData event_data{};
-    event_data.state = current_state;
-    event_data.event = WifiEvent::ProvisioningFailed;
-    event_data.error_code = validation_err;
-    emit(event_data);
+    WifiEventData fail_event{};
+    fail_event.mode = current_mode;
+    fail_event.sta_connected = sta_connected.load();
+    fail_event.sta_connecting = sta_connecting.load();
+    fail_event.provisioning_active = provisioning_active.load();
+    fail_event.event = WifiEvent::ProvisioningFailed;
+    fail_event.error_code = validation_err;
+    emit(fail_event);
     return;
   }
 
   temp_provisioning_credentials = WifiCredentials{ssid, passphrase};
 
   WifiEventData creds_event{};
-  creds_event.state = current_state;
+  creds_event.mode = current_mode;
+  creds_event.sta_connected = sta_connected.load();
+  creds_event.sta_connecting = sta_connecting.load();
+  creds_event.provisioning_active = provisioning_active.load();
   creds_event.event = WifiEvent::ProvisioningCredentialsReceived;
   creds_event.credentials = temp_provisioning_credentials;
   emit(creds_event);
 
-  transition_to(WifiState::ProvConnecting);
+  sta_connecting.store(true);
 
   wifi_config_t sta_cfg = make_sta_config(*temp_provisioning_credentials);
   esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
@@ -938,7 +934,10 @@ void WifiService::on_provisioning_done(void *event_data) {
     temp_provisioning_credentials.reset();
 
     WifiEventData fail_event{};
-    fail_event.state = current_state;
+    fail_event.mode = current_mode;
+    fail_event.sta_connected = sta_connected.load();
+    fail_event.sta_connecting = sta_connecting.load();
+    fail_event.provisioning_active = provisioning_active.load();
     fail_event.event = WifiEvent::ProvisioningFailed;
     fail_event.error_code = err;
     emit(fail_event);
@@ -952,7 +951,10 @@ void WifiService::on_provisioning_done(void *event_data) {
     temp_provisioning_credentials.reset();
 
     WifiEventData fail_event{};
-    fail_event.state = current_state;
+    fail_event.mode = current_mode;
+    fail_event.sta_connected = sta_connected.load();
+    fail_event.sta_connecting = sta_connecting.load();
+    fail_event.provisioning_active = provisioning_active.load();
     fail_event.event = WifiEvent::ProvisioningFailed;
     fail_event.error_code = err;
     emit(fail_event);
@@ -960,23 +962,6 @@ void WifiService::on_provisioning_done(void *event_data) {
   }
 
   logging::info("Provisioning: Connection initiated, waiting for IP address...", wifi_tag);
-}
-
-void WifiService::transition_to(WifiState new_state) {
-  if (current_state == new_state) {
-    return;
-  }
-
-  WifiState old_state = current_state;
-  current_state = new_state;
-
-  logging::infof(wifi_tag, "State: %d -> %d", static_cast<int>(old_state),
-                 static_cast<int>(new_state));
-
-  WifiEventData event_data{};
-  event_data.state = new_state;
-  event_data.event = WifiEvent::StateChanged;
-  emit(event_data);
 }
 
 void WifiService::emit(const WifiEventData &data) const {
@@ -988,7 +973,10 @@ void WifiService::emit(const WifiEventData &data) const {
 void WifiService::emit_connection_failed(esp_err_t error) {
   sta_last_error = error;
   WifiEventData event_data{};
-  event_data.state = current_state;
+  event_data.mode = current_mode;
+  event_data.sta_connected = sta_connected.load();
+  event_data.sta_connecting = sta_connecting.load();
+  event_data.provisioning_active = provisioning_active.load();
   event_data.event = WifiEvent::ConnectionFailed;
   event_data.error_code = error;
   emit(event_data);
@@ -1004,10 +992,33 @@ WifiService &wifi() {
 }
 
 std::string ip_to_string(const esp_ip4_addr_t &ip) {
-  const ip4_addr_t *ip4 = reinterpret_cast<const ip4_addr_t *>(&ip);
+  auto *ip4 = reinterpret_cast<const ip4_addr_t *>(&ip);
   char buffer[16] = {0};
   ip4addr_ntoa_r(ip4, buffer, sizeof(buffer));
-  return std::string(buffer);
+  return {buffer};
+}
+
+const char* wifi_event_to_string(WifiEvent event) {
+  switch (event) {
+    case WifiEvent::Connected: return "Connected";
+    case WifiEvent::Disconnected: return "Disconnected";
+    case WifiEvent::ConnectionFailed: return "ConnectionFailed";
+    case WifiEvent::ProvisioningCredentialsReceived: return "ProvisioningCredentialsReceived";
+    case WifiEvent::ProvisioningCompleted: return "ProvisioningCompleted";
+    case WifiEvent::ProvisioningFailed: return "ProvisioningFailed";
+    case WifiEvent::StateChanged: return "StateChanged";
+    default: return "Unknown";
+  }
+}
+
+const char* wifi_mode_to_string(WifiMode mode) {
+  switch (mode) {
+    case WifiMode::Off: return "Off";
+    case WifiMode::STA: return "STA";
+    case WifiMode::AP: return "AP";
+    case WifiMode::APSTA: return "APSTA";
+    default: return "Unknown";
+  }
 }
 
 } // namespace earbrain

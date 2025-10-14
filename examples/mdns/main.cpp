@@ -20,7 +20,7 @@ extern "C" void app_main(void) {
   auto config = earbrain::wifi().config();
   config.ap_config = ap_config;
 
-  esp_err_t err = earbrain::wifi().set_config(config);
+  esp_err_t err = earbrain::wifi().config(config);
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
     return;

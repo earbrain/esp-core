@@ -14,9 +14,6 @@ extern "C" void app_main(void) {
   // Optional: listen for Wi-Fi events just to log basic state changes
   earbrain::wifi().on([](const earbrain::WifiEventData &event) {
     switch (event.event) {
-      case earbrain::WifiEvent::StateChanged:
-        earbrain::logging::infof(TAG, "WiFi state changed: %d", static_cast<int>(event.state));
-        break;
       case earbrain::WifiEvent::Connected:
         earbrain::logging::info("WiFi connected (STA)", TAG);
         break;

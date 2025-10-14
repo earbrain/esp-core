@@ -64,8 +64,8 @@ extern "C" void app_main(void) {
   const char* mode_str = (status.mode == earbrain::WifiMode::STA) ? "STA" :
                          (status.mode == earbrain::WifiMode::APSTA) ? "APSTA" : "Off";
   earbrain::logging::infof(TAG, "WiFi Mode: %s", mode_str);
-  earbrain::logging::infof(TAG, "State: %d", static_cast<int>(status.state));
   earbrain::logging::infof(TAG, "Connected: %s", status.sta_connected ? "Yes" : "No");
+  earbrain::logging::infof(TAG, "Connecting: %s", status.sta_connecting ? "Yes" : "No");
 
   earbrain::logging::info("", TAG);
   earbrain::logging::info("Running idle loop...", TAG);
