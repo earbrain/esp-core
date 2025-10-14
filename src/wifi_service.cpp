@@ -222,6 +222,19 @@ esp_err_t WifiService::start_wifi_sta_mode() {
   return ESP_OK;
 }
 
+wifi_mode_t WifiService::get_wifi_mode() {
+  wifi_mode_t mode = WIFI_MODE_NULL;
+  esp_err_t err = esp_wifi_get_mode(&mode);
+  if (err != ESP_OK) {
+    if (err == ESP_ERR_WIFI_NOT_INIT) {
+      return WIFI_MODE_NULL;
+    }
+    logging::errorf(wifi_tag, "Failed to get WiFi mode: %s", esp_err_to_name(err));
+    return WIFI_MODE_NULL;
+  }
+  return mode;
+}
+
 void WifiService::reset_sta_state() {
   sta_connected = false;
   sta_last_error = ESP_OK;
@@ -283,14 +296,23 @@ esp_err_t WifiService::start_access_point() {
 }
 
 esp_err_t WifiService::stop_access_point() {
-  esp_err_t err = esp_wifi_stop();
-  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
-      err != ESP_ERR_WIFI_NOT_INIT) {
+  wifi_mode_t current_mode = get_wifi_mode();
+
+  // If not in APSTA mode, access point is already not active
+  if (current_mode != WIFI_MODE_APSTA) {
+    logging::info("Access point is not active", wifi_tag);
+    return ESP_OK;
+  }
+
+  // Switch from APSTA to STA only (keep station running)
+  esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to switch from APSTA to STA mode: %s",
+                    esp_err_to_name(err));
     return err;
   }
 
-  esp_wifi_set_mode(WIFI_MODE_NULL);
-  logging::info("Access point stopped", wifi_tag);
+  logging::info("Access point stopped (station still running)", wifi_tag);
   return ESP_OK;
 }
 
@@ -337,23 +359,50 @@ esp_err_t WifiService::start_station(const StationConfig &config) {
 }
 
 esp_err_t WifiService::stop_station() {
-  esp_err_t err = esp_wifi_stop();
-  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
-      err != ESP_ERR_WIFI_NOT_INIT) {
-    logging::errorf(wifi_tag, "Failed to stop WiFi: %s", esp_err_to_name(err));
-    return err;
+  wifi_mode_t current_mode = get_wifi_mode();
+
+  // If not in APSTA or STA mode, station is already not active
+  if (current_mode != WIFI_MODE_APSTA && current_mode != WIFI_MODE_STA) {
+    logging::info("Station is not active", wifi_tag);
+    return ESP_OK;
   }
 
-  err = esp_wifi_set_mode(WIFI_MODE_NULL);
-  if (err != ESP_OK) {
-    logging::warnf(wifi_tag, "Failed to set WiFi mode to NULL: %s",
-                   esp_err_to_name(err));
+  // Disconnect station
+  esp_err_t disconnect_err = esp_wifi_disconnect();
+  if (disconnect_err != ESP_OK && disconnect_err != ESP_ERR_WIFI_NOT_STARTED &&
+      disconnect_err != ESP_ERR_WIFI_NOT_INIT &&
+      disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
+    logging::warnf(wifi_tag, "Failed to disconnect station: %s",
+                   esp_err_to_name(disconnect_err));
   }
 
+  // Clear station state
   sta_connected = false;
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
+
+  // If in APSTA mode, keep APSTA mode and just disconnect STA
+  // This keeps the access point running without disruption
+  if (current_mode == WIFI_MODE_APSTA) {
+    logging::info("Station disconnected (APSTA mode maintained, access point still running)", wifi_tag);
+    return ESP_OK;
+  }
+
+  // STA-only mode: stop WiFi completely
+  esp_err_t stop_err = esp_wifi_stop();
+  if (stop_err != ESP_OK && stop_err != ESP_ERR_WIFI_NOT_STARTED &&
+      stop_err != ESP_ERR_WIFI_NOT_INIT) {
+    logging::errorf(wifi_tag, "Failed to stop WiFi: %s", esp_err_to_name(stop_err));
+    return stop_err;
+  }
+
+  esp_err_t mode_err = esp_wifi_set_mode(WIFI_MODE_NULL);
+  if (mode_err != ESP_OK) {
+    logging::warnf(wifi_tag, "Failed to set WiFi mode to NULL: %s",
+                   esp_err_to_name(mode_err));
+  }
+
   logging::info("Station stopped", wifi_tag);
   return ESP_OK;
 }

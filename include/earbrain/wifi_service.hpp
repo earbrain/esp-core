@@ -74,6 +74,7 @@ private:
   esp_err_t ensure_initialized();
   esp_err_t register_event_handlers();
   esp_err_t start_wifi_sta_mode();
+  wifi_mode_t get_wifi_mode();
   void reset_sta_state();
   static void ip_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
