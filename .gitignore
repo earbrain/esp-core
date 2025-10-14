@@ -1,0 +1,28 @@
+.DS_Store
+
+# PlatformIO
+.pio/
+
+# Local virtual environments
+.venv/
+
+# Local direnv config
+.envrc
+.direnv/
+
+# Build outputs
+build/
+**/build/
+**/.cache/
+compile_commands.json
+
+# Auto-generated lock files
+dependencies.lock
+
+# ESP-IDF configuration files
+sdkconfig
+sdkconfig.old
+
+# ESP-IDF managed components
+managed_components/
+examples/managed_components/
