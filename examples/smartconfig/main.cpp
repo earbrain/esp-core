@@ -35,43 +35,26 @@ extern "C" void app_main(void) {
   err = earbrain::wifi().wait_for_smart_config(120000);
 
   if (err == ESP_OK) {
-    earbrain::logging::info("SmartConfig completed! WiFi credentials received.", TAG);
+    earbrain::logging::info("SmartConfig completed! Credentials received and connection validated.", TAG);
 
-    // Stop SmartConfig
+    // Stop SmartConfig (connection and saving happened automatically)
     earbrain::wifi().stop_smart_config();
 
-    // Load the saved credentials
-    auto credentials = earbrain::wifi().load_credentials();
-    if (credentials.has_value()) {
-      earbrain::logging::infof(TAG, "Saved SSID: %s", credentials->ssid.c_str());
-      earbrain::logging::info("", TAG);
-      earbrain::logging::info("Attempting to connect to the configured network...", TAG);
+    // Display connection info
+    auto status = earbrain::wifi().status();
+    if (status.sta_connected) {
+      const ip4_addr_t *ip4 = reinterpret_cast<const ip4_addr_t *>(&status.sta_ip);
+      char ip_buffer[16] = {0};
+      ip4addr_ntoa_r(ip4, ip_buffer, sizeof(ip_buffer));
 
-      // Try to connect using the saved credentials
-      err = earbrain::wifi().connect();
+      earbrain::logging::info("Successfully connected to WiFi!", TAG);
+      earbrain::logging::infof(TAG, "IP Address: %s", ip_buffer);
 
-      if (err == ESP_OK) {
-        earbrain::logging::info("Successfully connected to WiFi!", TAG);
-
-        auto status = earbrain::wifi().status();
-        if (status.sta_connected) {
-          const ip4_addr_t *ip4 = reinterpret_cast<const ip4_addr_t *>(&status.sta_ip);
-          char ip_buffer[16] = {0};
-          ip4addr_ntoa_r(ip4, ip_buffer, sizeof(ip_buffer));
-          earbrain::logging::infof(TAG, "IP Address: %s", ip_buffer);
-        }
-      } else {
-        earbrain::logging::errorf(TAG, "Failed to connect: %s", esp_err_to_name(err));
-
-        // Show disconnect reason if available
-        auto status = earbrain::wifi().status();
-        if (status.sta_last_disconnect_reason != WIFI_REASON_UNSPECIFIED) {
-          earbrain::logging::infof(TAG, "Disconnect reason: %d",
-                                   static_cast<int>(status.sta_last_disconnect_reason));
-        }
+      // Show saved credentials (auto-saved after validation)
+      auto credentials = earbrain::wifi().load_credentials();
+      if (credentials.has_value()) {
+        earbrain::logging::infof(TAG, "Saved SSID: %s", credentials->ssid.c_str());
       }
-    } else {
-      earbrain::logging::error("Failed to load saved credentials", TAG);
     }
   } else if (err == ESP_ERR_TIMEOUT) {
     earbrain::logging::warn("SmartConfig timed out. No credentials received.", TAG);

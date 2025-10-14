@@ -11,47 +11,52 @@ static const char *TAG = "wifi_sta_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("=== WiFi Station & Scan Demo ===", TAG);
 
-  earbrain::logging::info("Starting WiFi in station mode...", TAG);
-  esp_err_t err = earbrain::wifi().start_station();
-
-  if (err != ESP_OK) {
-    earbrain::logging::errorf(TAG, "Failed to start station: %s", esp_err_to_name(err));
-    return;
-  }
-
-  earbrain::logging::info("Station mode started successfully!", TAG);
-
-  // Save and connect to WiFi if credentials are provided
+  // Connect to WiFi if credentials are provided
 #if defined(CONFIG_WIFI_SSID) && defined(CONFIG_WIFI_PASSWORD)
   const char* ssid = CONFIG_WIFI_SSID;
   const char* password = CONFIG_WIFI_PASSWORD;
 
   if (strlen(ssid) > 0) {
     earbrain::logging::info("", TAG);
-    earbrain::logging::infof(TAG, "Saving WiFi credentials to NVS: %s", ssid);
+    earbrain::logging::infof(TAG, "Starting WiFi and connecting to: %s", ssid);
 
-    // Save credentials to NVS
-    err = earbrain::wifi().save_credentials(ssid, password);
-    if (err == ESP_OK) {
-      earbrain::logging::info("Credentials saved successfully!", TAG);
-    } else {
-      earbrain::logging::errorf(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
-    }
+    earbrain::StationConfig config;
+    config.ssid = ssid;
+    config.passphrase = password;
 
-    // Connect using saved credentials
-    earbrain::logging::infof(TAG, "Connecting to WiFi: %s", ssid);
-    err = earbrain::wifi().connect();
+    // Start WiFi and connect (all in one step)
+    esp_err_t err = earbrain::wifi().start_station(config);
 
     if (err == ESP_OK) {
-      earbrain::logging::info("WiFi connection initiated successfully!", TAG);
+      earbrain::logging::info("Successfully connected to WiFi!", TAG);
+
+      auto status = earbrain::wifi().status();
+      if (status.sta_connected) {
+        const ip4_addr_t *ip4 = reinterpret_cast<const ip4_addr_t *>(&status.sta_ip);
+        char ip_buffer[16] = {0};
+        ip4addr_ntoa_r(ip4, ip_buffer, sizeof(ip_buffer));
+        earbrain::logging::infof(TAG, "IP Address: %s", ip_buffer);
+      }
     } else {
-      earbrain::logging::errorf(TAG, "Failed to initiate connection: %s", esp_err_to_name(err));
+      earbrain::logging::errorf(TAG, "Failed to connect: %s", esp_err_to_name(err));
     }
   } else {
     earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
+    earbrain::logging::info("Starting WiFi without connection...", TAG);
+    esp_err_t err = earbrain::wifi().start_station();
+    if (err != ESP_OK) {
+      earbrain::logging::errorf(TAG, "Failed to start station: %s", esp_err_to_name(err));
+      return;
+    }
   }
 #else
   earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
+  earbrain::logging::info("Starting WiFi without connection...", TAG);
+  esp_err_t err = earbrain::wifi().start_station();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to start station: %s", esp_err_to_name(err));
+    return;
+  }
 #endif
 
   vTaskDelay(pdMS_TO_TICKS(1000));
@@ -59,6 +64,7 @@ extern "C" void app_main(void) {
   auto status = earbrain::wifi().status();
   earbrain::logging::infof(TAG, "AP active: %s", status.ap_active ? "Yes" : "No");
   earbrain::logging::infof(TAG, "STA active: %s", status.sta_active ? "Yes" : "No");
+  earbrain::logging::infof(TAG, "STA connected: %s", status.sta_connected ? "Yes" : "No");
 
   earbrain::logging::info("", TAG);
   earbrain::logging::info("Performing WiFi scan...", TAG);

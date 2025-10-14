@@ -48,14 +48,15 @@ public:
   WifiService& operator=(WifiService&&) = delete;
 
   esp_err_t start_station();
+  esp_err_t start_station(const StationConfig &config);
   esp_err_t stop_station();
 
   esp_err_t start_access_point(const AccessPointConfig &config);
   esp_err_t start_access_point();
   esp_err_t stop_access_point();
 
-  esp_err_t connect(const StationConfig &config);
-  esp_err_t connect();
+  esp_err_t try_connect(const StationConfig &config);
+  esp_err_t try_connect();
 
   esp_err_t save_credentials(std::string_view ssid, std::string_view passphrase);
   std::optional<StationConfig> load_credentials();
@@ -72,7 +73,8 @@ public:
 private:
   esp_err_t ensure_initialized();
   esp_err_t register_event_handlers();
-
+  esp_err_t start_wifi_sta_mode();
+  void reset_sta_state();
   static void ip_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
   static void wifi_event_handler(void *arg, esp_event_base_t event_base,
@@ -88,6 +90,7 @@ private:
   AccessPointConfig ap_config;
   StationConfig sta_config;
   std::optional<StationConfig> credentials;
+  std::optional<StationConfig> temp_smartconfig_credentials;
   bool initialized;
   bool handlers_registered;
   std::atomic<bool> sta_connected;

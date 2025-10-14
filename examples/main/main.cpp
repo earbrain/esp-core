@@ -179,7 +179,7 @@ static void example_smartconfig() {
       earbrain::logging::info("Attempting to connect to the configured network...", TAG);
 
       // Try to connect using the saved credentials
-      err = earbrain::wifi().connect();
+      err = earbrain::wifi().try_connect();
 
       if (err == ESP_OK) {
         earbrain::logging::info("Successfully connected to WiFi!", TAG);

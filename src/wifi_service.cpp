@@ -7,21 +7,21 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_smartconfig.h"
+#include "esp_task_wdt.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
-#include "esp_smartconfig.h"
-#include "nvs.h"
-#include "nvs_flash.h"
-#include "lwip/ip4_addr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_task_wdt.h"
+#include "lwip/ip4_addr.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 
 namespace earbrain {
 
@@ -94,16 +94,17 @@ wifi_config_t make_sta_config(const StationConfig &config) {
 } // namespace
 
 WifiService::WifiService()
-  : softap_netif(nullptr), sta_netif(nullptr), ap_config{}, sta_config{},
-    initialized(false), handlers_registered(false), sta_connected(false),
-    sta_retry_count(0), sta_manual_disconnect(false), sta_ip{},
-    sta_last_disconnect_reason(WIFI_REASON_UNSPECIFIED),
-    sta_last_error(ESP_OK), smartconfig_active(false), smartconfig_done(false) {
-}
+    : softap_netif(nullptr), sta_netif(nullptr), ap_config{}, sta_config{},
+      initialized(false), handlers_registered(false), sta_connected(false),
+      sta_retry_count(0), sta_manual_disconnect(false), sta_ip{},
+      sta_last_disconnect_reason(WIFI_REASON_UNSPECIFIED),
+      sta_last_error(ESP_OK), smartconfig_active(false),
+      smartconfig_done(false) {}
 
 esp_err_t WifiService::ensure_initialized() {
   esp_err_t err = nvs_flash_init();
-  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
+      err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
     err = nvs_flash_erase();
     if (err != ESP_OK) {
       return err;
@@ -160,8 +161,8 @@ esp_err_t WifiService::register_event_handlers() {
     return ESP_OK;
   }
 
-  esp_err_t err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                             &WifiService::ip_event_handler, this);
+  esp_err_t err = esp_event_handler_register(
+      IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiService::ip_event_handler, this);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     return err;
   }
@@ -176,6 +177,51 @@ esp_err_t WifiService::register_event_handlers() {
 
   handlers_registered = true;
   return ESP_OK;
+}
+
+esp_err_t WifiService::start_wifi_sta_mode() {
+  esp_err_t err = ensure_initialized();
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  // Stop WiFi if already running
+  esp_err_t stop_err = esp_wifi_stop();
+  if (stop_err != ESP_OK && stop_err != ESP_ERR_WIFI_NOT_STARTED &&
+      stop_err != ESP_ERR_WIFI_NOT_INIT) {
+    logging::warnf(wifi_tag,
+                   "Failed to stop Wi-Fi before starting STA mode: %s",
+                   esp_err_to_name(stop_err));
+    return stop_err;
+  }
+
+  // Set to STA mode
+  err = esp_wifi_set_mode(WIFI_MODE_STA);
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to set WiFi mode to STA: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  // Start WiFi
+  err = esp_wifi_start();
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to start WiFi in STA mode: %s",
+                    esp_err_to_name(err));
+    esp_wifi_set_mode(WIFI_MODE_NULL);
+    return err;
+  }
+
+  reset_sta_state();
+  return ESP_OK;
+}
+
+void WifiService::reset_sta_state() {
+  sta_connected = false;
+  sta_retry_count = 0;
+  sta_last_error = ESP_OK;
+  sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
+  sta_ip.store({.addr = 0});
 }
 
 esp_err_t WifiService::start_access_point(const AccessPointConfig &config) {
@@ -223,7 +269,8 @@ esp_err_t WifiService::start_access_point(const AccessPointConfig &config) {
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
-  logging::infof(wifi_tag, "Access point started (APSTA mode): %s", ap_config.ssid.c_str());
+  logging::infof(wifi_tag, "Access point started (APSTA mode): %s",
+                 ap_config.ssid.c_str());
   return ESP_OK;
 }
 
@@ -244,44 +291,40 @@ esp_err_t WifiService::stop_access_point() {
 }
 
 esp_err_t WifiService::start_station() {
-  esp_err_t err = ensure_initialized();
+  esp_err_t err = start_wifi_sta_mode();
   if (err != ESP_OK) {
     return err;
   }
 
-  // Stop WiFi if already running
-  esp_err_t stop_err = esp_wifi_stop();
-  if (stop_err != ESP_OK && stop_err != ESP_ERR_WIFI_NOT_STARTED &&
-      stop_err != ESP_ERR_WIFI_NOT_INIT) {
-    logging::warnf(wifi_tag, "Failed to stop Wi-Fi before starting STA mode: %s",
-                   esp_err_to_name(stop_err));
-    return stop_err;
-  }
-
-  // Set to STA mode
-  err = esp_wifi_set_mode(WIFI_MODE_STA);
-  if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Failed to set WiFi mode to STA: %s",
-                    esp_err_to_name(err));
-    return err;
-  }
-
-  // Start WiFi
-  err = esp_wifi_start();
-  if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Failed to start WiFi in STA mode: %s",
-                    esp_err_to_name(err));
-    esp_wifi_set_mode(WIFI_MODE_NULL);
-    return err;
-  }
-
-  sta_connected = false;
-  sta_retry_count = 0;
-  sta_last_error = ESP_OK;
-  sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
-  sta_ip.store({.addr = 0});
   logging::info("Station started", wifi_tag);
-  return ESP_OK;
+
+  // Load saved credentials and connect
+  auto saved_config = load_credentials();
+  if (!saved_config.has_value()) {
+    logging::warn("No saved credentials found, station started without connection", wifi_tag);
+    return ESP_OK;
+  }
+
+  logging::infof(wifi_tag, "Connecting to saved WiFi: %s", saved_config->ssid.c_str());
+  return try_connect(saved_config.value());
+}
+
+esp_err_t WifiService::start_station(const StationConfig &config) {
+  esp_err_t err = start_wifi_sta_mode();
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  logging::infof(wifi_tag, "Station started, connecting to: %s", config.ssid.c_str());
+
+  // Save credentials and connect
+  err = save_credentials(config.ssid, config.passphrase);
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to save credentials: %s", esp_err_to_name(err));
+    return err;
+  }
+
+  return try_connect(config);
 }
 
 esp_err_t WifiService::stop_station() {
@@ -307,7 +350,7 @@ esp_err_t WifiService::stop_station() {
   return ESP_OK;
 }
 
-esp_err_t WifiService::connect(const StationConfig &config) {
+esp_err_t WifiService::try_connect(const StationConfig &config) {
   esp_err_t err = ensure_initialized();
   if (err != ESP_OK) {
     sta_last_error = err;
@@ -322,9 +365,9 @@ esp_err_t WifiService::connect(const StationConfig &config) {
     return err;
   }
 
-  // Only works in APSTA mode
-  if (current_mode != WIFI_MODE_APSTA) {
-    logging::warn("connect() requires APSTA mode", wifi_tag);
+  // STA or APSTA mode required (AP-only won't work)
+  if (current_mode != WIFI_MODE_STA && current_mode != WIFI_MODE_APSTA) {
+    logging::warn("try_connect() requires STA or APSTA mode", wifi_tag);
     sta_last_error = ESP_ERR_INVALID_STATE;
     return ESP_ERR_INVALID_STATE;
   }
@@ -337,7 +380,8 @@ esp_err_t WifiService::connect(const StationConfig &config) {
     if (disconnect_err != ESP_ERR_WIFI_NOT_STARTED &&
         disconnect_err != ESP_ERR_WIFI_NOT_INIT &&
         disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
-      logging::warnf(wifi_tag, "Failed to disconnect before reconnecting: %s", esp_err_to_name(disconnect_err));
+      logging::warnf(wifi_tag, "Failed to disconnect before reconnecting: %s",
+                     esp_err_to_name(disconnect_err));
     }
   }
 
@@ -366,7 +410,8 @@ esp_err_t WifiService::connect(const StationConfig &config) {
   sta_last_error = ESP_OK;
   sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   sta_ip.store({.addr = 0});
-  logging::infof(wifi_tag, "Station connection initiated (APSTA mode): ssid='%s', passphrase_len=%zu",
+  logging::infof(wifi_tag,
+                 "Station connection initiated: ssid='%s', passphrase_len=%zu",
                  sta_config.ssid.c_str(), sta_config.passphrase.size());
 
   // Wait for connection result
@@ -380,14 +425,14 @@ esp_err_t WifiService::connect(const StationConfig &config) {
 
     // Connection successful
     if (sta_connected) {
-      logging::infof(wifi_tag, "Successfully connected to SSID: %s", sta_config.ssid.c_str());
+      logging::infof(wifi_tag, "Successfully connected to SSID: %s",
+                     sta_config.ssid.c_str());
       return ESP_OK;
     }
 
     // Connection failed with error
     if (sta_last_error != ESP_OK) {
-      logging::errorf(wifi_tag,
-                      "Connection failed: %s (disconnect_reason=%d)",
+      logging::errorf(wifi_tag, "Connection failed: %s (disconnect_reason=%d)",
                       esp_err_to_name(sta_last_error),
                       static_cast<int>(sta_last_disconnect_reason));
       return sta_last_error;
@@ -395,8 +440,7 @@ esp_err_t WifiService::connect(const StationConfig &config) {
 
     // Disconnected with a reason (e.g., wrong password)
     if (sta_last_disconnect_reason != WIFI_REASON_UNSPECIFIED) {
-      logging::errorf(wifi_tag,
-                      "Connection failed (disconnect_reason=%d)",
+      logging::errorf(wifi_tag, "Connection failed (disconnect_reason=%d)",
                       static_cast<int>(sta_last_disconnect_reason));
 
       // Map disconnect reason to error code
@@ -426,7 +470,8 @@ esp_err_t WifiService::connect(const StationConfig &config) {
   return ESP_ERR_TIMEOUT;
 }
 
-esp_err_t WifiService::save_credentials(std::string_view ssid, std::string_view passphrase) {
+esp_err_t WifiService::save_credentials(std::string_view ssid,
+                                        std::string_view passphrase) {
   wifi_config_t wifi_config = {};
 
   // Copy SSID (max 32 bytes)
@@ -435,7 +480,8 @@ esp_err_t WifiService::save_credentials(std::string_view ssid, std::string_view 
   wifi_config.sta.ssid[ssid_len] = '\0';
 
   // Copy passphrase (max 64 bytes)
-  size_t pass_len = std::min(passphrase.length(), sizeof(wifi_config.sta.password) - 1);
+  size_t pass_len =
+      std::min(passphrase.length(), sizeof(wifi_config.sta.password) - 1);
   std::memcpy(wifi_config.sta.password, passphrase.data(), pass_len);
   wifi_config.sta.password[pass_len] = '\0';
 
@@ -444,13 +490,14 @@ esp_err_t WifiService::save_credentials(std::string_view ssid, std::string_view 
 
   if (err == ESP_OK) {
     // Cache the credentials
-    credentials = StationConfig{
-      .ssid = std::string(ssid),
-      .passphrase = std::string(passphrase)
-    };
-    logging::infof(wifi_tag, "Saved Wi-Fi credentials for SSID: %s", std::string(ssid).c_str());
+    credentials = StationConfig{.ssid = std::string(ssid),
+
+                                .passphrase = std::string(passphrase)};
+    logging::infof(wifi_tag, "Saved Wi-Fi credentials for SSID: %s",
+                   std::string(ssid).c_str());
   } else {
-    logging::errorf(wifi_tag, "Failed to save Wi-Fi credentials: %s", esp_err_to_name(err));
+    logging::errorf(wifi_tag, "Failed to save Wi-Fi credentials: %s",
+                    esp_err_to_name(err));
   }
 
   return err;
@@ -466,7 +513,8 @@ std::optional<StationConfig> WifiService::load_credentials() {
   esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
 
   if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Failed to load Wi-Fi credentials: %s", esp_err_to_name(err));
+    logging::errorf(wifi_tag, "Failed to load Wi-Fi credentials: %s",
+                    esp_err_to_name(err));
     return std::nullopt;
   }
 
@@ -478,16 +526,19 @@ std::optional<StationConfig> WifiService::load_credentials() {
 
   // Convert to StationConfig and cache it
   StationConfig config;
-  config.ssid = std::string(reinterpret_cast<const char*>(wifi_config.sta.ssid));
-  config.passphrase = std::string(reinterpret_cast<const char*>(wifi_config.sta.password));
+  config.ssid =
+      std::string(reinterpret_cast<const char *>(wifi_config.sta.ssid));
+  config.passphrase =
+      std::string(reinterpret_cast<const char *>(wifi_config.sta.password));
 
   credentials = config;
-  logging::infof(wifi_tag, "Loaded saved Wi-Fi credentials for SSID: %s", config.ssid.c_str());
+  logging::infof(wifi_tag, "Loaded saved Wi-Fi credentials for SSID: %s",
+                 config.ssid.c_str());
 
   return config;
 }
 
-esp_err_t WifiService::connect() {
+esp_err_t WifiService::try_connect() {
   esp_err_t err = ensure_initialized();
   if (err != ESP_OK) {
     sta_last_error = err;
@@ -501,12 +552,13 @@ esp_err_t WifiService::connect() {
     return ESP_ERR_NOT_FOUND;
   }
 
-  return connect(saved_config.value());
+  return try_connect(saved_config.value());
 }
 
 void WifiService::ip_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data) {
-  if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP || !event_data) {
+  if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP ||
+      !event_data) {
     return;
   }
   auto *wifi = static_cast<WifiService *>(arg);
@@ -530,7 +582,8 @@ void WifiService::wifi_event_handler(void *arg, esp_event_base_t event_base,
   switch (event_id) {
   case WIFI_EVENT_STA_DISCONNECTED:
     if (event_data) {
-      const auto *event = static_cast<wifi_event_sta_disconnected_t *>(event_data);
+      const auto *event =
+          static_cast<wifi_event_sta_disconnected_t *>(event_data);
       wifi->on_sta_disconnected(*event);
     }
     break;
@@ -551,9 +604,27 @@ void WifiService::on_sta_got_ip(const ip_event_got_ip_t &event) {
   char ip_buffer[16] = {0};
   ip4addr_ntoa_r(ip4, ip_buffer, sizeof(ip_buffer));
   logging::infof(wifi_tag, "Station got IP: %s", ip_buffer);
+
+  // Auto-save SmartConfig credentials after successful connection
+  if (smartconfig_active.load() && temp_smartconfig_credentials.has_value()) {
+    esp_err_t err = save_credentials(temp_smartconfig_credentials->ssid,
+                                     temp_smartconfig_credentials->passphrase);
+
+    if (err == ESP_OK) {
+      logging::info("SmartConfig credentials verified and saved successfully",
+                    wifi_tag);
+      smartconfig_done.store(true);
+    } else {
+      logging::errorf(wifi_tag, "Failed to save SmartConfig credentials: %s",
+                      esp_err_to_name(err));
+    }
+
+    temp_smartconfig_credentials.reset();
+  }
 }
 
-void WifiService::on_sta_disconnected(const wifi_event_sta_disconnected_t &event) {
+void WifiService::on_sta_disconnected(
+    const wifi_event_sta_disconnected_t &event) {
   sta_connected = false;
   sta_ip.store({.addr = 0});
   const bool manual = sta_manual_disconnect.exchange(false);
@@ -561,7 +632,8 @@ void WifiService::on_sta_disconnected(const wifi_event_sta_disconnected_t &event
   if (manual && event.reason == WIFI_REASON_ASSOC_LEAVE) {
     sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
     sta_last_error = ESP_OK;
-    logging::info("Station disconnected intentionally (manual reconnect)", wifi_tag);
+    logging::info("Station disconnected intentionally (manual reconnect)",
+                  wifi_tag);
     return;
   }
 
@@ -680,25 +752,28 @@ esp_err_t WifiService::start_smart_config() {
     return ESP_ERR_INVALID_STATE;
   }
 
-  // Start WiFi in STA mode using start_station()
-  esp_err_t err = start_station();
+  // Start WiFi in STA mode (without connecting)
+  esp_err_t err = start_wifi_sta_mode();
   if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Failed to start station for SmartConfig: %s",
-                    esp_err_to_name(err));
     return err;
   }
+
+  logging::info("WiFi started for SmartConfig", wifi_tag);
 
   // Register SmartConfig event handlers
-  err = esp_event_handler_register(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
-                                   &WifiService::smartconfig_event_handler, this);
+  err =
+      esp_event_handler_register(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
+                                 &WifiService::smartconfig_event_handler, this);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-    logging::errorf(wifi_tag, "Failed to register SmartConfig event handler: %s",
+    logging::errorf(wifi_tag,
+                    "Failed to register SmartConfig event handler: %s",
                     esp_err_to_name(err));
     return err;
   }
 
-  err = esp_event_handler_register(SC_EVENT, SC_EVENT_SEND_ACK_DONE,
-                                   &WifiService::smartconfig_event_handler, this);
+  err =
+      esp_event_handler_register(SC_EVENT, SC_EVENT_SEND_ACK_DONE,
+                                 &WifiService::smartconfig_event_handler, this);
   if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
     esp_event_handler_unregister(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
                                  &WifiService::smartconfig_event_handler);
@@ -788,8 +863,10 @@ bool WifiService::is_smart_config_active() const {
   return smartconfig_active.load();
 }
 
-void WifiService::smartconfig_event_handler(void *arg, esp_event_base_t event_base,
-                                            int32_t event_id, void *event_data) {
+void WifiService::smartconfig_event_handler(void *arg,
+                                            esp_event_base_t event_base,
+                                            int32_t event_id,
+                                            void *event_data) {
   if (event_base != SC_EVENT) {
     return;
   }
@@ -818,29 +895,48 @@ void WifiService::on_smartconfig_done(void *event_data) {
     return;
   }
 
-  const auto *event = static_cast<smartconfig_event_got_ssid_pswd_t *>(event_data);
-  std::string ssid(reinterpret_cast<const char*>(event->ssid),
-                   strnlen(reinterpret_cast<const char*>(event->ssid), sizeof(event->ssid)));
-  std::string passphrase(reinterpret_cast<const char*>(event->password),
-                         strnlen(reinterpret_cast<const char*>(event->password), sizeof(event->password)));
+  const auto *event =
+      static_cast<smartconfig_event_got_ssid_pswd_t *>(event_data);
+  std::string ssid(reinterpret_cast<const char *>(event->ssid),
+                   strnlen(reinterpret_cast<const char *>(event->ssid),
+                           sizeof(event->ssid)));
+  std::string passphrase(
+      reinterpret_cast<const char *>(event->password),
+      strnlen(reinterpret_cast<const char *>(event->password),
+              sizeof(event->password)));
 
-  logging::infof(wifi_tag, "SmartConfig received credentials: SSID='%s', passphrase_len=%zu",
-                 ssid.c_str(), passphrase.size());
+  logging::infof(
+      wifi_tag,
+      "SmartConfig received credentials: SSID='%s', passphrase_len=%zu",
+      ssid.c_str(), passphrase.size());
 
-  // Save credentials to NVS
-  esp_err_t err = save_credentials(ssid, passphrase);
+  // Store credentials temporarily (will be saved on successful connection)
+  temp_smartconfig_credentials = StationConfig{ssid, passphrase};
+
+  // Configure STA interface with the received credentials
+  wifi_config_t sta_cfg = make_sta_config(*temp_smartconfig_credentials);
+  esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
   if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Failed to save SmartConfig credentials: %s",
+    logging::errorf(wifi_tag, "Failed to configure STA interface: %s",
                     esp_err_to_name(err));
-  } else {
-    logging::info("SmartConfig credentials saved successfully", wifi_tag);
+    temp_smartconfig_credentials.reset();
+    return;
   }
 
-  smartconfig_done.store(true);
-  // Note: We don't automatically connect here; user must call connect() explicitly
+  // Attempt to connect (non-blocking)
+  err = esp_wifi_connect();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+    logging::errorf(wifi_tag, "Failed to initiate connection: %s",
+                    esp_err_to_name(err));
+    temp_smartconfig_credentials.reset();
+    return;
+  }
+
+  logging::info("SmartConfig: Connection initiated, waiting for IP address...",
+                wifi_tag);
 }
 
-WifiService& wifi() {
+WifiService &wifi() {
   static WifiService instance;
   return instance;
 }
