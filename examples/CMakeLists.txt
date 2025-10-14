@@ -2,25 +2,25 @@ cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/..")
 
-# Pass example selection flags to C/C++ compiler
-if(EXAMPLE_LOGGING)
-    add_definitions(-DEXAMPLE_LOGGING)
+# Select which example to build (default: wifi)
+if(NOT EXAMPLE)
+    set(EXAMPLE "wifi")
 endif()
 
-if(EXAMPLE_WIFI)
-    add_definitions(-DEXAMPLE_WIFI)
+# Validate EXAMPLE value
+set(VALID_EXAMPLES wifi smartconfig logging metrics tasks)
+if(NOT EXAMPLE IN_LIST VALID_EXAMPLES)
+    message(FATAL_ERROR "Invalid EXAMPLE value: ${EXAMPLE}. Valid values are: ${VALID_EXAMPLES}")
 endif()
 
-if(EXAMPLE_SMARTCONFIG)
-    add_definitions(-DEXAMPLE_SMARTCONFIG)
-endif()
+message(STATUS "Building example: ${EXAMPLE}")
 
-if(EXAMPLE_TASKS)
-    add_definitions(-DEXAMPLE_TASKS)
-endif()
+# Set the source file path based on EXAMPLE
+set(EXAMPLE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/${EXAMPLE}/main.cpp")
 
-if(EXAMPLE_METRICS)
-    add_definitions(-DEXAMPLE_METRICS)
+# Check if the example source exists
+if(NOT EXISTS "${EXAMPLE_SOURCE}")
+    message(FATAL_ERROR "Example source not found: ${EXAMPLE_SOURCE}")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

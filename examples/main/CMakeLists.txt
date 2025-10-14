@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "main.cpp"
+        "${EXAMPLE_SOURCE}"
     REQUIRES
         esp-core
 )
