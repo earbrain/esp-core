@@ -85,6 +85,18 @@ wifi_config_t make_sta_config(const StationConfig &config) {
   return cfg;
 }
 
+esp_err_t validate_station_config(const StationConfig &config) {
+  if (!validation::is_valid_ssid(config.ssid)) {
+    logging::error("Invalid STA SSID (length must be 1-32 bytes)", wifi_tag);
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (!validation::is_valid_passphrase(config.passphrase)) {
+    logging::error("Invalid STA passphrase (length must be 8-63 or 64 hex)", wifi_tag);
+    return ESP_ERR_INVALID_ARG;
+  }
+  return ESP_OK;
+}
+
 } // namespace
 
 WifiService::WifiService()
@@ -302,6 +314,11 @@ esp_err_t WifiService::start_station() {
 }
 
 esp_err_t WifiService::start_station(const StationConfig &config) {
+  esp_err_t validation_err = validate_station_config(config);
+  if (validation_err != ESP_OK) {
+    return validation_err;
+  }
+
   esp_err_t err = start_wifi_sta_mode();
   if (err != ESP_OK) {
     return err;
@@ -342,6 +359,12 @@ esp_err_t WifiService::stop_station() {
 }
 
 esp_err_t WifiService::try_connect(const StationConfig &config) {
+  esp_err_t validation_err = validate_station_config(config);
+  if (validation_err != ESP_OK) {
+    sta_last_error = validation_err;
+    return validation_err;
+  }
+
   esp_err_t err = ensure_initialized();
   if (err != ESP_OK) {
     sta_last_error = err;
@@ -462,6 +485,12 @@ esp_err_t WifiService::try_connect(const StationConfig &config) {
 
 esp_err_t WifiService::save_credentials(std::string_view ssid,
                                         std::string_view passphrase) {
+  StationConfig config{std::string(ssid), std::string(passphrase)};
+  esp_err_t validation_err = validate_station_config(config);
+  if (validation_err != ESP_OK) {
+    return validation_err;
+  }
+
   wifi_config_t wifi_config = {};
 
   // Copy SSID (max 32 bytes)
@@ -898,6 +927,13 @@ void WifiService::on_smartconfig_done(void *event_data) {
       wifi_tag,
       "SmartConfig received credentials: SSID='%s', passphrase_len=%zu",
       ssid.c_str(), passphrase.size());
+
+  StationConfig received{ssid, passphrase};
+  esp_err_t validation_err = validate_station_config(received);
+  if (validation_err != ESP_OK) {
+    logging::error("SmartConfig provided invalid credentials", wifi_tag);
+    return;
+  }
 
   // Store credentials temporarily (will be saved on successful connection)
   temp_smartconfig_credentials = StationConfig{ssid, passphrase};
