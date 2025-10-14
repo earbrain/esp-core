@@ -17,10 +17,18 @@ extern "C" void app_main(void) {
   ap_config.channel = 6;
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
-  esp_err_t err = earbrain::wifi().start_apsta(ap_config);
+  auto config = earbrain::wifi().config();
+  config.ap_config = ap_config;
 
+  esp_err_t err = earbrain::wifi().set_config(config);
   if (err != ESP_OK) {
-    earbrain::logging::errorf(TAG, "Failed to start AP: %s", esp_err_to_name(err));
+    earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
+    return;
+  }
+
+  err = earbrain::wifi().mode(earbrain::WifiMode::APSTA);
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to set mode to APSTA: %s", esp_err_to_name(err));
     return;
   }
 

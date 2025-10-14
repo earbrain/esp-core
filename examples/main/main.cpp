@@ -5,10 +5,23 @@
 #include "earbrain/wifi_service.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lwip/ip4_addr.h"
 #include <atomic>
 
 static const char *TAG = "core_example";
+
+static const char *wifi_mode_string(earbrain::WifiMode mode) {
+  switch (mode) {
+  case earbrain::WifiMode::STA:
+    return "STA";
+  case earbrain::WifiMode::AP:
+    return "AP";
+  case earbrain::WifiMode::APSTA:
+    return "APSTA";
+  case earbrain::WifiMode::Off:
+  default:
+    return "Off";
+  }
+}
 
 static void example_logging() {
   earbrain::logging::info("=== Logging Demo ===", TAG);
@@ -32,10 +45,18 @@ static void example_wifi() {
   ap_config.channel = 6;
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
-  esp_err_t err = earbrain::wifi().start_apsta(ap_config);
+  auto config = earbrain::wifi().config();
+  config.ap_config = ap_config;
 
+  esp_err_t err = earbrain::wifi().set_config(config);
   if (err != ESP_OK) {
-    earbrain::logging::errorf(TAG, "Failed to start AP: %s", esp_err_to_name(err));
+    earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
+    return;
+  }
+
+  err = earbrain::wifi().mode(earbrain::WifiMode::APSTA);
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to set mode to APSTA: %s", esp_err_to_name(err));
     return;
   }
 
@@ -44,9 +65,22 @@ static void example_wifi() {
   vTaskDelay(pdMS_TO_TICKS(2000));
 
   auto status = earbrain::wifi().status();
-  earbrain::logging::infof(TAG, "AP active: %s, STA active: %s",
-                                 status.ap_active ? "Yes" : "No",
-                                 status.sta_active ? "Yes" : "No");
+  earbrain::logging::infof(TAG, "WiFi mode: %s", wifi_mode_string(status.mode));
+  earbrain::logging::infof(TAG, "State: %d", static_cast<int>(status.state));
+  earbrain::logging::infof(TAG, "STA connected: %s", status.sta_connected ? "Yes" : "No");
+  earbrain::logging::infof(TAG, "Provisioning active: %s",
+                                 status.provisioning_active ? "Yes" : "No");
+
+  if (status.sta_connected) {
+    earbrain::logging::infof(TAG, "STA IP: %s", earbrain::ip_to_string(status.sta_ip).c_str());
+  } else if (status.sta_last_disconnect_reason != WIFI_REASON_UNSPECIFIED) {
+    earbrain::logging::infof(TAG, "Last disconnect reason: %d",
+                                   static_cast<int>(status.sta_last_disconnect_reason));
+  }
+
+  if (status.sta_last_error != ESP_OK) {
+    earbrain::logging::infof(TAG, "Last error: %s", esp_err_to_name(status.sta_last_error));
+  }
 
   earbrain::logging::info("Performing WiFi scan...", TAG);
   auto scan_result = earbrain::wifi().perform_scan();
@@ -150,67 +184,98 @@ static void example_smartconfig() {
   earbrain::logging::info("4. Tap 'Confirm' to start provisioning", TAG);
   earbrain::logging::info("", TAG);
 
-  // Start SmartConfig
-  earbrain::logging::info("Starting SmartConfig...", TAG);
-  esp_err_t err = earbrain::wifi().start_smart_config();
+  earbrain::wifi().on([](const earbrain::WifiEventData& event) {
+    switch (event.event) {
+      case earbrain::WifiEvent::ProvisioningCredentialsReceived:
+        if (event.credentials.has_value()) {
+          earbrain::logging::infof(TAG, "Received credentials for SSID: %s",
+                                   event.credentials->ssid.c_str());
+          earbrain::logging::info("Attempting to connect...", TAG);
+        }
+        break;
 
+      case earbrain::WifiEvent::ProvisioningCompleted:
+        if (event.ip_address.has_value()) {
+          earbrain::logging::info("Provisioning completed! Credentials saved.", TAG);
+          earbrain::logging::infof(TAG, "IP Address: %s",
+                                   earbrain::ip_to_string(event.ip_address.value()).c_str());
+        }
+        break;
+
+      case earbrain::WifiEvent::ProvisioningFailed:
+        earbrain::logging::errorf(TAG, "Provisioning failed: %s",
+                                  esp_err_to_name(event.error_code));
+        break;
+
+      case earbrain::WifiEvent::Connected:
+        if (event.ip_address.has_value()) {
+          earbrain::logging::infof(TAG, "Connected! IP: %s",
+                                   earbrain::ip_to_string(event.ip_address.value()).c_str());
+        }
+        break;
+
+      default:
+        break;
+    }
+  });
+
+  earbrain::logging::info("Starting SmartConfig provisioning...", TAG);
+  esp_err_t err = earbrain::wifi().start_provisioning(earbrain::ProvisionMode::SmartConfig);
   if (err != ESP_OK) {
-    earbrain::logging::errorf(TAG, "Failed to start SmartConfig: %s", esp_err_to_name(err));
+    earbrain::logging::errorf(TAG, "Failed to start provisioning: %s", esp_err_to_name(err));
     return;
   }
 
-  earbrain::logging::info("SmartConfig started successfully!", TAG);
+  earbrain::logging::info("Provisioning started successfully!", TAG);
   earbrain::logging::info("Waiting for WiFi credentials (timeout: 120 seconds)...", TAG);
 
-  // Wait for SmartConfig to complete (120 seconds timeout)
-  err = earbrain::wifi().wait_for_smart_config(120000);
+  constexpr uint32_t timeout_ms = 120000;
+  constexpr uint32_t check_interval_ms = 500;
+  uint32_t elapsed_ms = 0;
 
-  if (err == ESP_OK) {
-    earbrain::logging::info("SmartConfig completed! WiFi credentials received.", TAG);
+  while (elapsed_ms < timeout_ms) {
+    vTaskDelay(pdMS_TO_TICKS(check_interval_ms));
+    elapsed_ms += check_interval_ms;
 
-    // Stop SmartConfig
-    earbrain::wifi().stop_smart_config();
+    const auto status = earbrain::wifi().status();
+    if (!status.provisioning_active ||
+        status.sta_connected ||
+        status.sta_last_error != ESP_OK) {
+      break;
+    }
+  }
 
-    // Load the saved credentials
+  const auto status = earbrain::wifi().status();
+  if (status.sta_connected) {
+    // Clean up provisioning resources immediately on success
+    earbrain::wifi().cancel_provisioning();
+
+    earbrain::logging::info("Provisioning completed successfully!", TAG);
+
+    if (status.sta_ip.addr != 0) {
+      earbrain::logging::infof(TAG, "Assigned IP: %s",
+                               earbrain::ip_to_string(status.sta_ip).c_str());
+    }
+
     auto credentials = earbrain::wifi().load_credentials();
     if (credentials.has_value()) {
       earbrain::logging::infof(TAG, "Saved SSID: %s", credentials->ssid.c_str());
-      earbrain::logging::info("", TAG);
-      earbrain::logging::info("Attempting to connect to the configured network...", TAG);
-
-      // Try to connect using the saved credentials
-      err = earbrain::wifi().try_connect();
-
-      if (err == ESP_OK) {
-        earbrain::logging::info("Successfully connected to WiFi!", TAG);
-
-        auto status = earbrain::wifi().status();
-        if (status.sta_connected) {
-          const ip4_addr_t *ip4 = reinterpret_cast<const ip4_addr_t *>(&status.sta_ip);
-          char ip_buffer[16] = {0};
-          ip4addr_ntoa_r(ip4, ip_buffer, sizeof(ip_buffer));
-          earbrain::logging::infof(TAG, "IP Address: %s", ip_buffer);
-        }
-      } else {
-        earbrain::logging::errorf(TAG, "Failed to connect: %s", esp_err_to_name(err));
-
-        // Show disconnect reason if available
-        auto status = earbrain::wifi().status();
-        if (status.sta_last_disconnect_reason != WIFI_REASON_UNSPECIFIED) {
-          earbrain::logging::infof(TAG, "Disconnect reason: %d",
-                                   static_cast<int>(status.sta_last_disconnect_reason));
-        }
-      }
-    } else {
-      earbrain::logging::error("Failed to load saved credentials", TAG);
     }
-  } else if (err == ESP_ERR_TIMEOUT) {
-    earbrain::logging::warn("SmartConfig timed out. No credentials received.", TAG);
-    earbrain::wifi().stop_smart_config();
+  } else if (status.sta_last_error != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Provisioning completed with error: %s",
+                              esp_err_to_name(status.sta_last_error));
+    if (status.sta_last_disconnect_reason != WIFI_REASON_UNSPECIFIED) {
+      earbrain::logging::infof(TAG, "Disconnect reason: %d",
+                               static_cast<int>(status.sta_last_disconnect_reason));
+    }
+  } else if (elapsed_ms >= timeout_ms) {
+    earbrain::logging::warn("Provisioning timed out. No credentials received.", TAG);
   } else {
-    earbrain::logging::errorf(TAG, "SmartConfig failed: %s", esp_err_to_name(err));
-    earbrain::wifi().stop_smart_config();
+    earbrain::logging::warn("Provisioning stopped before completion.", TAG);
   }
+
+  // Clean up provisioning if not already done (idempotent)
+  earbrain::wifi().cancel_provisioning();
 }
 
 extern "C" void app_main(void) {

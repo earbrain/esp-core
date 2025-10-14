@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-EXAMPLES=(wifi_ap wifi_sta mdns smartconfig logging metrics tasks)
+EXAMPLES=(wifi_ap wifi_sta wifi_scan mdns smartconfig logging metrics tasks)
 
 if [ $# -eq 0 ]; then
   echo "Usage: $0 <example>"

@@ -14,11 +14,19 @@ extern "C" void app_main(void) {
   ap_config.channel = 6;
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
-  earbrain::logging::infof(TAG, "Starting AP: %s", ap_config.ssid.c_str());
-  esp_err_t err = earbrain::wifi().start_apsta(ap_config);
+  auto config = earbrain::wifi().config();
+  config.ap_config = ap_config;
 
+  esp_err_t err = earbrain::wifi().set_config(config);
   if (err != ESP_OK) {
-    earbrain::logging::errorf(TAG, "Failed to start AP: %s", esp_err_to_name(err));
+    earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
+    return;
+  }
+
+  earbrain::logging::infof(TAG, "Starting AP: %s", ap_config.ssid.c_str());
+  err = earbrain::wifi().mode(earbrain::WifiMode::AP);
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to set mode to AP: %s", esp_err_to_name(err));
     return;
   }
 
@@ -27,8 +35,11 @@ extern "C" void app_main(void) {
   vTaskDelay(pdMS_TO_TICKS(2000));
 
   auto status = earbrain::wifi().status();
-  earbrain::logging::infof(TAG, "AP active: %s", status.ap_active ? "Yes" : "No");
-  earbrain::logging::infof(TAG, "STA active: %s", status.sta_active ? "Yes" : "No");
+  const char* mode_str = (status.mode == earbrain::WifiMode::AP) ? "AP" :
+                         (status.mode == earbrain::WifiMode::APSTA) ? "APSTA" :
+                         (status.mode == earbrain::WifiMode::STA) ? "STA" : "Off";
+  earbrain::logging::infof(TAG, "WiFi Mode: %s", mode_str);
+  earbrain::logging::infof(TAG, "State: %d", static_cast<int>(status.state));
 
   earbrain::logging::info("", TAG);
   earbrain::logging::info("Access Point is running. Connect to it using:", TAG);
