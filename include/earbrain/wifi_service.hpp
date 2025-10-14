@@ -46,6 +46,9 @@ public:
   WifiService(WifiService&&) = delete;
   WifiService& operator=(WifiService&&) = delete;
 
+  esp_err_t start_station();
+  esp_err_t stop_station();
+
   esp_err_t start_access_point(const AccessPointConfig &config);
   esp_err_t start_access_point();
   esp_err_t stop_access_point();

@@ -242,6 +242,70 @@ esp_err_t WifiService::stop_access_point() {
   return ESP_OK;
 }
 
+esp_err_t WifiService::start_station() {
+  esp_err_t err = ensure_initialized();
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  // Stop WiFi if already running
+  esp_err_t stop_err = esp_wifi_stop();
+  if (stop_err != ESP_OK && stop_err != ESP_ERR_WIFI_NOT_STARTED &&
+      stop_err != ESP_ERR_WIFI_NOT_INIT) {
+    logging::warnf(wifi_tag, "Failed to stop Wi-Fi before starting STA mode: %s",
+                   esp_err_to_name(stop_err));
+    return stop_err;
+  }
+
+  // Set to STA mode
+  err = esp_wifi_set_mode(WIFI_MODE_STA);
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to set WiFi mode to STA: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  // Start WiFi
+  err = esp_wifi_start();
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to start WiFi in STA mode: %s",
+                    esp_err_to_name(err));
+    esp_wifi_set_mode(WIFI_MODE_NULL);
+    return err;
+  }
+
+  sta_connected = false;
+  sta_retry_count = 0;
+  sta_last_error = ESP_OK;
+  sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
+  sta_ip.store({.addr = 0});
+  logging::info("Station started", wifi_tag);
+  return ESP_OK;
+}
+
+esp_err_t WifiService::stop_station() {
+  esp_err_t err = esp_wifi_stop();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED &&
+      err != ESP_ERR_WIFI_NOT_INIT) {
+    logging::errorf(wifi_tag, "Failed to stop WiFi: %s", esp_err_to_name(err));
+    return err;
+  }
+
+  err = esp_wifi_set_mode(WIFI_MODE_NULL);
+  if (err != ESP_OK) {
+    logging::warnf(wifi_tag, "Failed to set WiFi mode to NULL: %s",
+                   esp_err_to_name(err));
+  }
+
+  sta_connected = false;
+  sta_retry_count = 0;
+  sta_last_error = ESP_OK;
+  sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
+  sta_ip.store({.addr = 0});
+  logging::info("Station stopped", wifi_tag);
+  return ESP_OK;
+}
+
 esp_err_t WifiService::connect(const StationConfig &config) {
   esp_err_t err = ensure_initialized();
   if (err != ESP_OK) {
