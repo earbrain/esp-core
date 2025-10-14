@@ -15,7 +15,7 @@ struct esp_netif_obj;
 
 namespace earbrain {
 
-struct StationConfig {
+struct WifiCredentials {
   std::string ssid;
   std::string passphrase;
 };
@@ -42,24 +42,24 @@ public:
   WifiService();
   ~WifiService() = default;
 
-  WifiService(const WifiService&) = delete;
-  WifiService& operator=(const WifiService&) = delete;
-  WifiService(WifiService&&) = delete;
-  WifiService& operator=(WifiService&&) = delete;
+  WifiService(const WifiService &) = delete;
+  WifiService &operator=(const WifiService &) = delete;
+  WifiService(WifiService &&) = delete;
+  WifiService &operator=(WifiService &&) = delete;
 
-  esp_err_t start_station();
-  esp_err_t start_station(const StationConfig &config);
-  esp_err_t stop_station();
+  esp_err_t start();
+  esp_err_t start(const WifiCredentials &creds);
+  esp_err_t stop();
 
-  esp_err_t start_access_point(const AccessPointConfig &config);
-  esp_err_t start_access_point();
-  esp_err_t stop_access_point();
+  esp_err_t start_apsta(const AccessPointConfig &config);
+  esp_err_t start_apsta();
+  esp_err_t stop_apsta();
 
-  esp_err_t try_connect(const StationConfig &config);
+  esp_err_t try_connect(const WifiCredentials &creds);
   esp_err_t try_connect();
 
   esp_err_t save_credentials(std::string_view ssid, std::string_view passphrase);
-  std::optional<StationConfig> load_credentials();
+  std::optional<WifiCredentials> load_credentials();
 
   // SmartConfig operations
   esp_err_t start_smart_config();
@@ -89,9 +89,9 @@ private:
   esp_netif_obj *softap_netif;
   esp_netif_obj *sta_netif;
   AccessPointConfig ap_config;
-  StationConfig sta_config;
-  std::optional<StationConfig> credentials;
-  std::optional<StationConfig> temp_smartconfig_credentials;
+  WifiCredentials credentials;
+  std::optional<WifiCredentials> cached_credentials;
+  std::optional<WifiCredentials> temp_smartconfig_credentials;
   bool initialized;
   bool handlers_registered;
   std::atomic<bool> sta_connected;
@@ -103,6 +103,6 @@ private:
   std::atomic<bool> smartconfig_done;
 };
 
-WifiService& wifi();
+WifiService &wifi();
 
 } // namespace earbrain

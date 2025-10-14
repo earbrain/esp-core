@@ -15,7 +15,7 @@ extern "C" void app_main(void) {
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
   earbrain::logging::infof(TAG, "Starting AP: %s", ap_config.ssid.c_str());
-  esp_err_t err = earbrain::wifi().start_access_point(ap_config);
+  esp_err_t err = earbrain::wifi().start_apsta(ap_config);
 
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to start AP: %s", esp_err_to_name(err));

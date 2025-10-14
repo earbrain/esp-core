@@ -20,12 +20,12 @@ extern "C" void app_main(void) {
     earbrain::logging::info("", TAG);
     earbrain::logging::infof(TAG, "Starting WiFi and connecting to: %s", ssid);
 
-    earbrain::StationConfig config;
-    config.ssid = ssid;
-    config.passphrase = password;
+    earbrain::WifiCredentials credentials;
+    credentials.ssid = ssid;
+    credentials.passphrase = password;
 
     // Start WiFi and connect (all in one step)
-    esp_err_t err = earbrain::wifi().start_station(config);
+    esp_err_t err = earbrain::wifi().start(credentials);
 
     if (err == ESP_OK) {
       earbrain::logging::info("Successfully connected to WiFi!", TAG);
@@ -43,7 +43,7 @@ extern "C" void app_main(void) {
   } else {
     earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
     earbrain::logging::info("Starting WiFi without connection...", TAG);
-    esp_err_t err = earbrain::wifi().start_station();
+    esp_err_t err = earbrain::wifi().start();
     if (err != ESP_OK) {
       earbrain::logging::errorf(TAG, "Failed to start station: %s", esp_err_to_name(err));
       return;
@@ -52,7 +52,7 @@ extern "C" void app_main(void) {
 #else
   earbrain::logging::info("No WiFi credentials configured (use menuconfig or sdkconfig.local)", TAG);
   earbrain::logging::info("Starting WiFi without connection...", TAG);
-  esp_err_t err = earbrain::wifi().start_station();
+  esp_err_t err = earbrain::wifi().start();
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to start station: %s", esp_err_to_name(err));
     return;
