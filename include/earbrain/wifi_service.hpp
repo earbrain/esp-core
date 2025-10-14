@@ -31,6 +31,7 @@ struct WifiStatus {
   bool ap_active = false;
   bool sta_active = false;
   bool sta_connected = false;
+  bool smartconfig_active = false;
   esp_ip4_addr_t sta_ip{};
   wifi_err_reason_t sta_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
   esp_err_t sta_last_error = ESP_OK;
@@ -59,6 +60,12 @@ public:
   esp_err_t save_credentials(std::string_view ssid, std::string_view passphrase);
   std::optional<StationConfig> load_credentials();
 
+  // SmartConfig operations
+  esp_err_t start_smart_config();
+  esp_err_t stop_smart_config();
+  esp_err_t wait_for_smart_config(uint32_t timeout_ms = 120000);
+  bool is_smart_config_active() const;
+
   WifiScanResult perform_scan();
   WifiStatus status() const;
 
@@ -70,8 +77,11 @@ private:
                                int32_t event_id, void *event_data);
   static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                  int32_t event_id, void *event_data);
+  static void smartconfig_event_handler(void *arg, esp_event_base_t event_base,
+                                        int32_t event_id, void *event_data);
   void on_sta_got_ip(const ip_event_got_ip_t &event);
   void on_sta_disconnected(const wifi_event_sta_disconnected_t &event);
+  void on_smartconfig_done(void *event_data);
 
   esp_netif_obj *softap_netif;
   esp_netif_obj *sta_netif;
@@ -86,6 +96,8 @@ private:
   std::atomic<esp_ip4_addr_t> sta_ip;
   std::atomic<wifi_err_reason_t> sta_last_disconnect_reason;
   std::atomic<esp_err_t> sta_last_error;
+  std::atomic<bool> smartconfig_active;
+  std::atomic<bool> smartconfig_done;
 };
 
 WifiService& wifi();

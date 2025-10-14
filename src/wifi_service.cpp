@@ -15,6 +15,7 @@
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
+#include "esp_smartconfig.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "lwip/ip4_addr.h"
@@ -97,7 +98,7 @@ WifiService::WifiService()
     initialized(false), handlers_registered(false), sta_connected(false),
     sta_retry_count(0), sta_manual_disconnect(false), sta_ip{},
     sta_last_disconnect_reason(WIFI_REASON_UNSPECIFIED),
-    sta_last_error(ESP_OK) {
+    sta_last_error(ESP_OK), smartconfig_active(false), smartconfig_done(false) {
 }
 
 esp_err_t WifiService::ensure_initialized() {
@@ -668,7 +669,175 @@ WifiStatus WifiService::status() const {
     s.sta_last_error = ESP_OK;
   }
 
+  s.smartconfig_active = smartconfig_active.load();
+
   return s;
+}
+
+esp_err_t WifiService::start_smart_config() {
+  if (smartconfig_active.load()) {
+    logging::warn("SmartConfig is already active", wifi_tag);
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  // Start WiFi in STA mode using start_station()
+  esp_err_t err = start_station();
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to start station for SmartConfig: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  // Register SmartConfig event handlers
+  err = esp_event_handler_register(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
+                                   &WifiService::smartconfig_event_handler, this);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    logging::errorf(wifi_tag, "Failed to register SmartConfig event handler: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  err = esp_event_handler_register(SC_EVENT, SC_EVENT_SEND_ACK_DONE,
+                                   &WifiService::smartconfig_event_handler, this);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    esp_event_handler_unregister(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
+                                 &WifiService::smartconfig_event_handler);
+    logging::errorf(wifi_tag, "Failed to register SmartConfig ACK handler: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  // Start SmartConfig with ESP-TOUCH V2 protocol
+  smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
+  err = esp_smartconfig_set_type(SC_TYPE_ESPTOUCH_V2);
+  if (err != ESP_OK) {
+    logging::warnf(wifi_tag, "Failed to set SmartConfig type: %s",
+                   esp_err_to_name(err));
+  }
+
+  err = esp_smartconfig_start(&cfg);
+  if (err != ESP_OK) {
+    esp_event_handler_unregister(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
+                                 &WifiService::smartconfig_event_handler);
+    esp_event_handler_unregister(SC_EVENT, SC_EVENT_SEND_ACK_DONE,
+                                 &WifiService::smartconfig_event_handler);
+    logging::errorf(wifi_tag, "Failed to start SmartConfig: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  smartconfig_active.store(true);
+  smartconfig_done.store(false);
+  logging::info("SmartConfig started", wifi_tag);
+  return ESP_OK;
+}
+
+esp_err_t WifiService::stop_smart_config() {
+  if (!smartconfig_active.load()) {
+    return ESP_OK;
+  }
+
+  esp_err_t err = esp_smartconfig_stop();
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to stop SmartConfig: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
+  // Unregister event handlers
+  esp_event_handler_unregister(SC_EVENT, SC_EVENT_GOT_SSID_PSWD,
+                               &WifiService::smartconfig_event_handler);
+  esp_event_handler_unregister(SC_EVENT, SC_EVENT_SEND_ACK_DONE,
+                               &WifiService::smartconfig_event_handler);
+
+  smartconfig_active.store(false);
+  smartconfig_done.store(false);
+  logging::info("SmartConfig stopped", wifi_tag);
+  return ESP_OK;
+}
+
+esp_err_t WifiService::wait_for_smart_config(uint32_t timeout_ms) {
+  if (!smartconfig_active.load()) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  constexpr uint32_t check_interval_ms = 500;
+  uint32_t elapsed_ms = 0;
+
+  while (elapsed_ms < timeout_ms) {
+    if (smartconfig_done.load()) {
+      logging::info("SmartConfig completed successfully", wifi_tag);
+      return ESP_OK;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(check_interval_ms));
+    elapsed_ms += check_interval_ms;
+
+    // Check if SmartConfig was stopped externally
+    if (!smartconfig_active.load()) {
+      logging::warn("SmartConfig was stopped externally", wifi_tag);
+      return ESP_ERR_INVALID_STATE;
+    }
+  }
+
+  logging::warn("SmartConfig timed out", wifi_tag);
+  return ESP_ERR_TIMEOUT;
+}
+
+bool WifiService::is_smart_config_active() const {
+  return smartconfig_active.load();
+}
+
+void WifiService::smartconfig_event_handler(void *arg, esp_event_base_t event_base,
+                                            int32_t event_id, void *event_data) {
+  if (event_base != SC_EVENT) {
+    return;
+  }
+
+  auto *wifi = static_cast<WifiService *>(arg);
+  if (!wifi) {
+    return;
+  }
+
+  switch (event_id) {
+  case SC_EVENT_GOT_SSID_PSWD:
+    if (event_data) {
+      wifi->on_smartconfig_done(event_data);
+    }
+    break;
+  case SC_EVENT_SEND_ACK_DONE:
+    logging::info("SmartConfig ACK sent to phone", wifi_tag);
+    break;
+  default:
+    break;
+  }
+}
+
+void WifiService::on_smartconfig_done(void *event_data) {
+  if (!event_data) {
+    return;
+  }
+
+  const auto *event = static_cast<smartconfig_event_got_ssid_pswd_t *>(event_data);
+  std::string ssid(reinterpret_cast<const char*>(event->ssid),
+                   strnlen(reinterpret_cast<const char*>(event->ssid), sizeof(event->ssid)));
+  std::string passphrase(reinterpret_cast<const char*>(event->password),
+                         strnlen(reinterpret_cast<const char*>(event->password), sizeof(event->password)));
+
+  logging::infof(wifi_tag, "SmartConfig received credentials: SSID='%s', passphrase_len=%zu",
+                 ssid.c_str(), passphrase.size());
+
+  // Save credentials to NVS
+  esp_err_t err = save_credentials(ssid, passphrase);
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Failed to save SmartConfig credentials: %s",
+                    esp_err_to_name(err));
+  } else {
+    logging::info("SmartConfig credentials saved successfully", wifi_tag);
+  }
+
+  smartconfig_done.store(true);
+  // Note: We don't automatically connect here; user must call connect() explicitly
 }
 
 WifiService& wifi() {
