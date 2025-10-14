@@ -607,4 +607,9 @@ WifiStatus WifiService::status() const {
   return s;
 }
 
+WifiService& wifi() {
+  static WifiService instance;
+  return instance;
+}
+
 } // namespace earbrain

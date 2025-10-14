@@ -32,8 +32,7 @@ static void example_wifi() {
   ap_config.channel = 6;
   ap_config.auth_mode = WIFI_AUTH_OPEN;
 
-  earbrain::WifiService wifi_service;
-  esp_err_t err = wifi_service.start_access_point(ap_config);
+  esp_err_t err = earbrain::wifi().start_access_point(ap_config);
 
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to start AP: %s", esp_err_to_name(err));
@@ -44,13 +43,13 @@ static void example_wifi() {
 
   vTaskDelay(pdMS_TO_TICKS(2000));
 
-  auto status = wifi_service.status();
+  auto status = earbrain::wifi().status();
   earbrain::logging::infof(TAG, "AP active: %s, STA active: %s",
                                  status.ap_active ? "Yes" : "No",
                                  status.sta_active ? "Yes" : "No");
 
   earbrain::logging::info("Performing WiFi scan...", TAG);
-  auto scan_result = wifi_service.perform_scan();
+  auto scan_result = earbrain::wifi().perform_scan();
 
   if (scan_result.error == ESP_OK) {
     earbrain::logging::infof(TAG, "Found %zu networks", scan_result.networks.size());
@@ -69,8 +68,7 @@ static void example_wifi() {
   mdns_config.protocol = "_tcp";
   mdns_config.port = 80;
 
-  earbrain::MdnsService mdns_service;
-  err = mdns_service.start(mdns_config);
+  err = earbrain::mdns().start(mdns_config);
 
   if (err == ESP_OK) {
     earbrain::logging::info("mDNS started successfully!", TAG);

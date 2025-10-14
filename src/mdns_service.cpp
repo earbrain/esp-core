@@ -125,4 +125,9 @@ esp_err_t MdnsService::stop() {
   return first_error;
 }
 
+MdnsService& mdns() {
+  static MdnsService instance;
+  return instance;
+}
+
 } // namespace earbrain

@@ -41,6 +41,11 @@ public:
   WifiService();
   ~WifiService() = default;
 
+  WifiService(const WifiService&) = delete;
+  WifiService& operator=(const WifiService&) = delete;
+  WifiService(WifiService&&) = delete;
+  WifiService& operator=(WifiService&&) = delete;
+
   esp_err_t start_access_point(const AccessPointConfig &config);
   esp_err_t start_access_point();
   esp_err_t stop_access_point();
@@ -79,5 +84,7 @@ private:
   std::atomic<wifi_err_reason_t> sta_last_disconnect_reason;
   std::atomic<esp_err_t> sta_last_error;
 };
+
+WifiService& wifi();
 
 } // namespace earbrain
