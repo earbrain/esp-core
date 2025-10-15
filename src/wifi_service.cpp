@@ -47,11 +47,29 @@ std::string format_bssid(const uint8_t (&bssid)[6]) {
   return std::string(buffer);
 }
 
+// Safe copy helpers for SSID and password
+void copy_ssid_safe(uint8_t (&dst)[32], std::string_view src) {
+  const size_t len = std::min(src.size(), size_t(32));
+  if (src.size() > 32) {
+    logging::warnf(wifi_tag, "SSID truncated from %zu to 32 bytes", src.size());
+  }
+  std::memset(dst, 0, 32);
+  std::memcpy(dst, src.data(), len);
+}
+
+void copy_password_safe(uint8_t (&dst)[64], std::string_view src) {
+  const size_t len = std::min(src.size(), size_t(64));
+  if (src.size() > 64) {
+    logging::warnf(wifi_tag, "Password truncated from %zu to 64 bytes", src.size());
+  }
+  std::memset(dst, 0, 64);
+  std::memcpy(dst, src.data(), len);
+}
+
 wifi_config_t make_ap_config(const AccessPointConfig &config) {
   wifi_config_t cfg{};
-  std::ranges::fill(cfg.ap.ssid, '\0');
-  std::copy_n(config.ssid.data(), config.ssid.size(), cfg.ap.ssid);
-  cfg.ap.ssid_len = config.ssid.size();
+  copy_ssid_safe(cfg.ap.ssid, config.ssid);
+  cfg.ap.ssid_len = std::min<uint8_t>(config.ssid.size(), 32);
   cfg.ap.channel = config.channel;
   cfg.ap.authmode = config.auth_mode;
   cfg.ap.max_connection = config.max_connections;
@@ -64,13 +82,9 @@ wifi_config_t make_ap_config(const AccessPointConfig &config) {
 
 wifi_config_t make_sta_config(const WifiCredentials &creds) {
   wifi_config_t cfg{};
-  std::ranges::fill(cfg.sta.ssid, '\0');
-  std::copy_n(creds.ssid.data(), creds.ssid.size(), cfg.sta.ssid);
-
-  std::ranges::fill(cfg.sta.password, '\0');
+  copy_ssid_safe(cfg.sta.ssid, creds.ssid);
   if (!creds.passphrase.empty()) {
-    std::copy_n(creds.passphrase.data(), creds.passphrase.size(),
-                cfg.sta.password);
+    copy_password_safe(cfg.sta.password, creds.passphrase);
   }
 
   cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
@@ -220,6 +234,7 @@ esp_err_t WifiService::start_wifi_sta_mode() {
   }
 
   reset_sta_state();
+  current_mode = WifiMode::STA;
   return ESP_OK;
 }
 
@@ -359,16 +374,17 @@ esp_err_t WifiService::connect(const WifiCredentials &creds) {
   }
 
   sta_connecting.store(true);
-  sta_manual_disconnect.store(true);
-  esp_err_t disconnect_err = esp_wifi_disconnect();
-  if (disconnect_err != ESP_OK) {
-    sta_manual_disconnect.store(false);
-    if (disconnect_err != ESP_ERR_WIFI_NOT_STARTED &&
-        disconnect_err != ESP_ERR_WIFI_NOT_INIT &&
-        disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
-      logging::warnf(wifi_tag, "Failed to disconnect before reconnecting: %s",
-                     esp_err_to_name(disconnect_err));
-    }
+
+  // Only disconnect if currently connected
+  bool was_connected = false;
+  wifi_ap_record_t ap{};
+  if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+    was_connected = true;
+  }
+
+  if (was_connected) {
+    sta_manual_disconnect.store(true);
+    esp_wifi_disconnect();
   }
 
   wifi_config_t sta_cfg = make_sta_config(creds);
@@ -407,6 +423,13 @@ esp_err_t WifiService::save_credentials(std::string_view ssid,
     return validation_err;
   }
 
+  esp_err_t err = ensure_initialized();
+  if (err != ESP_OK) {
+    logging::errorf(wifi_tag, "Cannot save credentials: not initialized: %s",
+                    esp_err_to_name(err));
+    return err;
+  }
+
   wifi_config_t sta_config = {};
 
   // Copy SSID (max 32 bytes)
@@ -421,7 +444,7 @@ esp_err_t WifiService::save_credentials(std::string_view ssid,
   sta_config.sta.password[pass_len] = '\0';
 
   // Set the WiFi configuration which will be stored in NVS
-  esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+  err = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
 
   if (err == ESP_OK) {
     // Cache the credentials
@@ -440,6 +463,13 @@ esp_err_t WifiService::save_credentials(std::string_view ssid,
 std::optional<WifiCredentials> WifiService::load_credentials() {
   if (cached_credentials.has_value()) {
     return cached_credentials;
+  }
+
+  esp_err_t init_err = ensure_initialized();
+  if (init_err != ESP_OK) {
+    logging::errorf(wifi_tag, "Cannot load credentials: not initialized: %s",
+                    esp_err_to_name(init_err));
+    return std::nullopt;
   }
 
   // Load from NVS
@@ -672,19 +702,24 @@ WifiScanResult WifiService::perform_scan() const {
   result.networks.reserve(records.size());
 
   for (const auto &record : records) {
+    WifiNetworkSummary summary{};
+
+    // Check for hidden network first
     const char *ssid_raw = reinterpret_cast<const char *>(record.ssid);
-    if (!ssid_raw || ssid_raw[0] == '\0') {
+    size_t ssid_len = ssid_raw ? strnlen(ssid_raw, sizeof(record.ssid)) : 0;
+    summary.hidden = (ssid_len == 0);
+
+    // Skip hidden networks (no SSID to display)
+    if (summary.hidden) {
       continue;
     }
 
-    WifiNetworkSummary summary{};
-    summary.ssid = ssid_raw;
+    summary.ssid.assign(ssid_raw, ssid_len);
     summary.bssid = format_bssid(record.bssid);
     summary.rssi = record.rssi;
     summary.signal = signal_quality_from_rssi(record.rssi);
     summary.channel = record.primary;
     summary.auth_mode = record.authmode;
-    summary.hidden = record.ssid[0] == '\0';
 
     // Only check for connected network if actually connected
     summary.connected = false;
