@@ -1,11 +1,13 @@
 #pragma once
 
+#include "completion.hpp"
 #include "esp_err.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_netif_types.h"
 #include "esp_wifi_types.h"
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -119,6 +121,8 @@ public:
 
   esp_err_t connect(const WifiCredentials &creds);
   esp_err_t connect();
+  esp_err_t connect_sync(const WifiCredentials &creds, uint32_t timeout_ms = 15000);
+  esp_err_t connect_sync(uint32_t timeout_ms = 15000);
   esp_err_t save_credentials(std::string_view ssid, std::string_view passphrase);
   std::optional<WifiCredentials> load_credentials();
 
@@ -169,6 +173,7 @@ private:
   WifiMode current_mode;
   ProvisionMode current_provisioning_mode;
   std::vector<EventListener> listeners;
+  std::shared_ptr<Completion<esp_err_t>> sync_completion;
 };
 
 WifiService &wifi();
