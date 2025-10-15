@@ -6,6 +6,11 @@
 #include "sdkconfig.h"
 #include <cstring>
 
+// Try to include credentials.h if it exists, otherwise fall back to sdkconfig
+#if __has_include("../credentials.h")
+#include "../credentials.h"
+#endif
+
 static const char *TAG = "wifi_test";
 
 // Global event counter for tracking
@@ -88,14 +93,11 @@ void test_apsta_mode() {
   wait_and_log(1000, "Settling");
   log_current_status();
 
-#if defined(CONFIG_WIFI_SSID) && defined(CONFIG_WIFI_PASSWORD)
-  const char* ssid = CONFIG_WIFI_SSID;
-  const char* password = CONFIG_WIFI_PASSWORD;
-
-  if (strlen(ssid) > 0) {
-    earbrain::logging::info("Attempting STA connection in APSTA mode...", TAG);
-    earbrain::WifiCredentials creds{ssid, password};
-    err = earbrain::wifi().connect(creds);
+  // Try to connect if credentials are available
+  auto saved_creds = earbrain::wifi().load_credentials();
+  if (saved_creds.has_value()) {
+    earbrain::logging::infof(TAG, "Attempting STA connection in APSTA mode to: %s", saved_creds->ssid.c_str());
+    err = earbrain::wifi().connect(saved_creds.value());
     earbrain::logging::infof(TAG, "Connect initiated: %s", esp_err_to_name(err));
 
     wait_and_log(5000, "Waiting for connection");
@@ -103,9 +105,6 @@ void test_apsta_mode() {
   } else {
     earbrain::logging::info("Skipping STA connection (no credentials configured)", TAG);
   }
-#else
-  earbrain::logging::info("Skipping STA connection (no credentials configured)", TAG);
-#endif
 }
 
 void test_sta_to_ap_to_apsta_transition() {
@@ -242,6 +241,15 @@ extern "C" void app_main(void) {
   earbrain::logging::info("", TAG);
   earbrain::logging::info("WiFi Test Suite", TAG);
   earbrain::logging::info("", TAG);
+
+  // Save credentials from credentials.h if available
+#if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
+  earbrain::logging::infof(TAG, "Saving credentials for: %s", WIFI_SSID);
+  esp_err_t save_err = earbrain::wifi().save_credentials(WIFI_SSID, WIFI_PASSWORD);
+  if (save_err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to save credentials: %s", esp_err_to_name(save_err));
+  }
+#endif
 
   // Register comprehensive event listener to track ALL events
   earbrain::wifi().on([](const earbrain::WifiEventData& event) {

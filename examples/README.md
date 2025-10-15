@@ -1,5 +1,14 @@
 # ESP Core Examples
 
+## WiFi Credentials
+
+Create `credentials.h` with your WiFi settings:
+
+```bash
+cp credentials.h.example credentials.h
+# Edit credentials.h with your SSID and password
+```
+
 ## Build and Run
 
 ```bash
