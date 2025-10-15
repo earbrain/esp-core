@@ -105,7 +105,7 @@ esp_err_t validate_station_config(const WifiCredentials &creds) {
     return ESP_ERR_INVALID_ARG;
   }
   if (!validation::is_valid_passphrase(creds.passphrase)) {
-    logging::error("Invalid STA passphrase (length must be 8-63 or 64 hex)", wifi_tag);
+    logging::error("Invalid STA passphrase (length must be 0 for open networks, 8-63, or 64 hex)", wifi_tag);
     return ESP_ERR_INVALID_ARG;
   }
   return ESP_OK;
