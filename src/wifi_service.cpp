@@ -1008,6 +1008,8 @@ void WifiService::emit(const WifiEventData &data) const {
 
 void WifiService::emit_connection_failed(esp_err_t error) {
   sta_last_error = error;
+  sta_connecting.store(false);  // Reset connecting flag
+
   WifiEventData event_data{};
   event_data.mode = current_mode;
   event_data.sta_connected = sta_connected.load();
