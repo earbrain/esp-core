@@ -121,8 +121,6 @@ public:
 
   esp_err_t connect(const WifiCredentials &creds);
   esp_err_t connect();
-  esp_err_t connect_sync(const WifiCredentials &creds, uint32_t timeout_ms = 15000);
-  esp_err_t connect_sync(uint32_t timeout_ms = 15000);
   esp_err_t save_credentials(std::string_view ssid, std::string_view passphrase);
   std::optional<WifiCredentials> load_credentials();
 
@@ -173,7 +171,6 @@ private:
   WifiMode current_mode;
   ProvisionMode current_provisioning_mode;
   std::vector<EventListener> listeners;
-  std::shared_ptr<Completion<esp_err_t>> sync_completion;
 };
 
 WifiService &wifi();

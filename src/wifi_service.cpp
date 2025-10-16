@@ -1,5 +1,4 @@
 #include "earbrain/wifi_service.hpp"
-#include "earbrain/completion.hpp"
 #include "earbrain/logging.hpp"
 #include "earbrain/validation.hpp"
 
@@ -521,41 +520,6 @@ esp_err_t WifiService::connect() {
   return connect(saved_credentials.value());
 }
 
-esp_err_t WifiService::connect_sync(const WifiCredentials &creds, uint32_t timeout_ms) {
-  sync_completion = std::make_shared<Completion<esp_err_t>>();
-
-  esp_err_t start_err = connect(creds);
-  if (start_err != ESP_OK) {
-    sync_completion.reset();
-    return start_err;
-  }
-
-  auto result = sync_completion->wait(timeout_ms);
-  sync_completion.reset();
-
-  if (!result.has_value()) {
-    logging::warnf(wifi_tag, "Connection timed out after %lu ms", timeout_ms);
-    return ESP_ERR_TIMEOUT;
-  }
-
-  return result.value();
-}
-
-esp_err_t WifiService::connect_sync(uint32_t timeout_ms) {
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    return err;
-  }
-
-  auto saved_credentials = load_credentials();
-  if (!saved_credentials.has_value()) {
-    logging::warn("No saved credentials found", wifi_tag);
-    return ESP_ERR_NOT_FOUND;
-  }
-
-  return connect_sync(saved_credentials.value(), timeout_ms);
-}
-
 void WifiService::ip_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data) {
   if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP ||
@@ -639,10 +603,6 @@ void WifiService::on_sta_got_ip(const ip_event_got_ip_t &event) {
   event_data.event = WifiEvent::Connected;
   event_data.ip_address = event.ip_info.ip;
   emit(event_data);
-
-  if (sync_completion) {
-    sync_completion->complete(ESP_OK);
-  }
 
   esp_ip4_addr_t ip = sta_ip.load();
   logging::infof(wifi_tag, "Station got IP: %s", ip_to_string(ip).c_str());
@@ -1056,10 +1016,6 @@ void WifiService::emit_connection_failed(esp_err_t error) {
   event_data.event = WifiEvent::ConnectionFailed;
   event_data.error_code = error;
   emit(event_data);
-
-  if (sync_completion) {
-    sync_completion->complete(error);
-  }
 }
 
 void WifiService::on(EventListener listener) {
