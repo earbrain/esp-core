@@ -13,7 +13,7 @@ constexpr const char mdns_tag[] = "mdns";
 
 } // namespace
 
-esp_err_t MdnsService::ensure_initialized() {
+esp_err_t MdnsService::initialize() {
   if (initialized) {
     return ESP_OK;
   }
@@ -42,6 +42,8 @@ esp_err_t MdnsService::ensure_initialized() {
 }
 
 esp_err_t MdnsService::start(const MdnsConfig &config) {
+  if (!initialized) return ESP_ERR_INVALID_STATE;
+
   if (running) {
     const esp_err_t stop_err = stop();
     if (stop_err != ESP_OK) {
@@ -51,12 +53,7 @@ esp_err_t MdnsService::start(const MdnsConfig &config) {
 
   MdnsConfig applied = config;
 
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    return err;
-  }
-
-  err = mdns_hostname_set(applied.hostname.c_str());
+  esp_err_t err = mdns_hostname_set(applied.hostname.c_str());
   if (err != ESP_OK) {
     stop();
     return err;

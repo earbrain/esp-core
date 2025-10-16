@@ -43,8 +43,16 @@ extern "C" void app_main(void) {
 
   vTaskDelay(pdMS_TO_TICKS(2000));
 
-  // Start mDNS service
+  // Initialize mDNS service
   earbrain::logging::info("", TAG);
+  earbrain::logging::info("Initializing mDNS service...", TAG);
+  err = earbrain::mdns().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize mDNS: %s", esp_err_to_name(err));
+    return;
+  }
+
+  // Start mDNS service
   earbrain::logging::info("Starting mDNS service...", TAG);
   earbrain::MdnsConfig mdns_config;
   mdns_config.hostname = "esp-core-device";

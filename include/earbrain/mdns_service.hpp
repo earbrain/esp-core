@@ -26,6 +26,7 @@ public:
   MdnsService(MdnsService &&) = delete;
   MdnsService &operator=(MdnsService &&) = delete;
 
+  esp_err_t initialize();
   esp_err_t start(const MdnsConfig &config);
   esp_err_t start();
   esp_err_t stop();
@@ -33,7 +34,6 @@ public:
   const MdnsConfig &config() const noexcept { return mdns_config; }
 
 private:
-  esp_err_t ensure_initialized();
 
   MdnsConfig mdns_config;
   bool initialized = false;
