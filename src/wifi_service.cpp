@@ -732,7 +732,7 @@ WifiScanResult WifiService::perform_scan() const {
   }
 
   // Sort by signal strength
-  std::ranges::sort(result.networks, [](const WifiNetworkSummary &a, const WifiNetworkSummary &b) {
+  std::sort(result.networks.begin(), result.networks.end(), [](const WifiNetworkSummary &a, const WifiNetworkSummary &b) {
     return a.signal > b.signal;
   });
 
