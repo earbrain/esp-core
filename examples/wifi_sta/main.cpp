@@ -16,6 +16,13 @@ static const char *TAG = "wifi_sta_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("=== WiFi Station Demo ===", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+
   earbrain::wifi().on([](const earbrain::WifiEventData& event) {
     switch (event.event) {
       case earbrain::WifiEvent::Connected:

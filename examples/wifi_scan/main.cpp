@@ -11,6 +11,13 @@ static const char *TAG = "wifi_scan_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("=== WiFi Scan Only Demo ===", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+
   // Optional: listen for Wi-Fi events just to log basic state changes
   earbrain::wifi().on([](const earbrain::WifiEventData &event) {
     switch (event.event) {

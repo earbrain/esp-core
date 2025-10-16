@@ -123,7 +123,11 @@ WifiService::WifiService()
       current_mode(WifiMode::Off),
       current_provisioning_mode(ProvisionMode::SmartConfig) {}
 
-esp_err_t WifiService::ensure_initialized() {
+esp_err_t WifiService::initialize() {
+  if (initialized) {
+    return ESP_OK; // Already initialized
+  }
+
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
       err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -161,13 +165,10 @@ esp_err_t WifiService::ensure_initialized() {
     }
   }
 
-  if (!initialized) {
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    err = esp_wifi_init(&cfg);
-    if (err != ESP_OK) {
-      return err;
-    }
-    initialized = true;
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  err = esp_wifi_init(&cfg);
+  if (err != ESP_OK) {
+    return err;
   }
 
   err = register_event_handlers();
@@ -175,6 +176,7 @@ esp_err_t WifiService::ensure_initialized() {
     return err;
   }
 
+  initialized = true;
   return ESP_OK;
 }
 
@@ -202,10 +204,7 @@ esp_err_t WifiService::register_event_handlers() {
 }
 
 esp_err_t WifiService::start_wifi_sta_mode() {
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    return err;
-  }
+  if (!initialized) return ESP_ERR_INVALID_STATE;
 
   // Stop WiFi if already running
   esp_err_t stop_err = esp_wifi_stop();
@@ -218,7 +217,7 @@ esp_err_t WifiService::start_wifi_sta_mode() {
   }
 
   // Set to STA mode
-  err = esp_wifi_set_mode(WIFI_MODE_STA);
+  esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
   if (err != ESP_OK) {
     logging::errorf(wifi_tag, "Failed to set WiFi mode to STA: %s",
                     esp_err_to_name(err));
@@ -261,11 +260,7 @@ wifi_mode_t WifiService::to_native_mode(WifiMode mode) {
 }
 
 esp_err_t WifiService::mode(WifiMode new_mode) {
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Initialization failed: %s", esp_err_to_name(err));
-    return err;
-  }
+  if (!initialized) return ESP_ERR_INVALID_STATE;
 
   // Avoid unnecessary restart if already in the requested mode
   if (current_mode == new_mode && initialized) {
@@ -288,7 +283,7 @@ esp_err_t WifiService::mode(WifiMode new_mode) {
     return ESP_OK;
   }
 
-  err = esp_wifi_set_mode(native_mode);
+  esp_err_t err = esp_wifi_set_mode(native_mode);
   if (err != ESP_OK) {
     logging::errorf(wifi_tag, "Failed to set WiFi mode: %s", esp_err_to_name(err));
     return err;
@@ -349,20 +344,16 @@ esp_err_t WifiService::config(const WifiConfig &config) {
 }
 
 esp_err_t WifiService::connect(const WifiCredentials &creds) {
+  if (!initialized) return ESP_ERR_INVALID_STATE;
+
   esp_err_t validation_err = validate_station_config(creds);
   if (validation_err != ESP_OK) {
     emit_connection_failed(validation_err);
     return validation_err;
   }
 
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    emit_connection_failed(err);
-    return err;
-  }
-
   wifi_mode_t mode = WIFI_MODE_NULL;
-  err = esp_wifi_get_mode(&mode);
+  esp_err_t err = esp_wifi_get_mode(&mode);
   if (err != ESP_OK) {
     emit_connection_failed(err);
     return err;
@@ -418,17 +409,12 @@ esp_err_t WifiService::connect(const WifiCredentials &creds) {
 
 esp_err_t WifiService::save_credentials(std::string_view ssid,
                                         std::string_view passphrase) {
+  if (!initialized) return ESP_ERR_INVALID_STATE;
+
   WifiCredentials creds{std::string(ssid), std::string(passphrase)};
   esp_err_t validation_err = validate_station_config(creds);
   if (validation_err != ESP_OK) {
     return validation_err;
-  }
-
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    logging::errorf(wifi_tag, "Cannot save credentials: not initialized: %s",
-                    esp_err_to_name(err));
-    return err;
   }
 
   wifi_config_t sta_config = {};
@@ -445,7 +431,7 @@ esp_err_t WifiService::save_credentials(std::string_view ssid,
   sta_config.sta.password[pass_len] = '\0';
 
   // Set the WiFi configuration which will be stored in NVS
-  err = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+  esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta_config);
 
   if (err == ESP_OK) {
     // Cache the credentials
@@ -462,15 +448,10 @@ esp_err_t WifiService::save_credentials(std::string_view ssid,
 }
 
 std::optional<WifiCredentials> WifiService::load_credentials() {
+  if (!initialized) return std::nullopt;
+
   if (cached_credentials.has_value()) {
     return cached_credentials;
-  }
-
-  esp_err_t init_err = ensure_initialized();
-  if (init_err != ESP_OK) {
-    logging::errorf(wifi_tag, "Cannot load credentials: not initialized: %s",
-                    esp_err_to_name(init_err));
-    return std::nullopt;
   }
 
   // Load from NVS
@@ -504,11 +485,7 @@ std::optional<WifiCredentials> WifiService::load_credentials() {
 }
 
 esp_err_t WifiService::connect() {
-  esp_err_t err = ensure_initialized();
-  if (err != ESP_OK) {
-    emit_connection_failed(err);
-    return err;
-  }
+  if (!initialized) return ESP_ERR_INVALID_STATE;
 
   auto saved_credentials = load_credentials();
   if (!saved_credentials.has_value()) {
@@ -1008,7 +985,7 @@ void WifiService::emit(const WifiEventData &data) const {
 
 void WifiService::emit_connection_failed(esp_err_t error) {
   sta_last_error = error;
-  sta_connecting.store(false);  // Reset connecting flag
+  sta_connecting.store(false); // Reset connecting flag
 
   WifiEventData event_data{};
   event_data.mode = current_mode;
@@ -1036,26 +1013,39 @@ std::string ip_to_string(const esp_ip4_addr_t &ip) {
   return {buffer};
 }
 
-const char* wifi_event_to_string(WifiEvent event) {
+const char *wifi_event_to_string(WifiEvent event) {
   switch (event) {
-    case WifiEvent::Connected: return "Connected";
-    case WifiEvent::Disconnected: return "Disconnected";
-    case WifiEvent::ConnectionFailed: return "ConnectionFailed";
-    case WifiEvent::ProvisioningCredentialsReceived: return "ProvisioningCredentialsReceived";
-    case WifiEvent::ProvisioningCompleted: return "ProvisioningCompleted";
-    case WifiEvent::ProvisioningFailed: return "ProvisioningFailed";
-    case WifiEvent::StateChanged: return "StateChanged";
-    default: return "Unknown";
+  case WifiEvent::Connected:
+    return "Connected";
+  case WifiEvent::Disconnected:
+    return "Disconnected";
+  case WifiEvent::ConnectionFailed:
+    return "ConnectionFailed";
+  case WifiEvent::ProvisioningCredentialsReceived:
+    return "ProvisioningCredentialsReceived";
+  case WifiEvent::ProvisioningCompleted:
+    return "ProvisioningCompleted";
+  case WifiEvent::ProvisioningFailed:
+    return "ProvisioningFailed";
+  case WifiEvent::StateChanged:
+    return "StateChanged";
+  default:
+    return "Unknown";
   }
 }
 
-const char* wifi_mode_to_string(WifiMode mode) {
+const char *wifi_mode_to_string(WifiMode mode) {
   switch (mode) {
-    case WifiMode::Off: return "Off";
-    case WifiMode::STA: return "STA";
-    case WifiMode::AP: return "AP";
-    case WifiMode::APSTA: return "APSTA";
-    default: return "Unknown";
+  case WifiMode::Off:
+    return "Off";
+  case WifiMode::STA:
+    return "STA";
+  case WifiMode::AP:
+    return "AP";
+  case WifiMode::APSTA:
+    return "APSTA";
+  default:
+    return "Unknown";
   }
 }
 

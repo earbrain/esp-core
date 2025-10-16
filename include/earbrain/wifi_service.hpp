@@ -113,6 +113,7 @@ public:
   WifiService(WifiService &&) = delete;
   WifiService &operator=(WifiService &&) = delete;
 
+  esp_err_t initialize();
   esp_err_t mode(WifiMode new_mode);
 
   // Configuration management
@@ -135,7 +136,6 @@ public:
 
 private:
   static wifi_mode_t to_native_mode(WifiMode mode);
-  esp_err_t ensure_initialized();
   esp_err_t register_event_handlers();
   esp_err_t start_wifi_sta_mode();
   void reset_sta_state();

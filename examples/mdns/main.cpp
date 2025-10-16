@@ -10,6 +10,13 @@ static const char *TAG = "mdns_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("=== mDNS Service Demo ===", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+
   // Start WiFi in AP mode (mDNS needs network interface)
   earbrain::logging::info("Starting WiFi AP (required for mDNS)...", TAG);
   earbrain::AccessPointConfig ap_config;
@@ -20,7 +27,7 @@ extern "C" void app_main(void) {
   auto config = earbrain::wifi().config();
   config.ap_config = ap_config;
 
-  esp_err_t err = earbrain::wifi().config(config);
+  err = earbrain::wifi().config(config);
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
     return;

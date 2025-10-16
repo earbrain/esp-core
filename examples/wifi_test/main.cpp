@@ -242,6 +242,14 @@ extern "C" void app_main(void) {
   earbrain::logging::info("WiFi Test Suite", TAG);
   earbrain::logging::info("", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+  earbrain::logging::info("WiFi service initialized successfully", TAG);
+
   // Save credentials from credentials.h if available
 #if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
   earbrain::logging::infof(TAG, "Saving credentials for: %s", WIFI_SSID);

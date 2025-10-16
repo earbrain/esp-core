@@ -8,6 +8,13 @@ static const char *TAG = "smartconfig_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("SmartConfig demo", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+
   // Listen for Wi-Fi events and cancel provisioning after ACK is sent
   earbrain::wifi().on([](const earbrain::WifiEventData &e) {
     switch (e.event) {
@@ -53,7 +60,7 @@ extern "C" void app_main(void) {
   });
 
   // Start SmartConfig provisioning
-  esp_err_t err = earbrain::wifi().start_provisioning(earbrain::ProvisionMode::SmartConfig);
+  err = earbrain::wifi().start_provisioning(earbrain::ProvisionMode::SmartConfig);
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to start provisioning: %s", esp_err_to_name(err));
     return;

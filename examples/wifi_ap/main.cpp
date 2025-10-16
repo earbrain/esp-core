@@ -9,6 +9,13 @@ static const char *TAG = "wifi_ap_example";
 extern "C" void app_main(void) {
   earbrain::logging::info("=== WiFi Access Point Demo ===", TAG);
 
+  // Initialize WiFi service
+  esp_err_t err = earbrain::wifi().initialize();
+  if (err != ESP_OK) {
+    earbrain::logging::errorf(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+    return;
+  }
+
   earbrain::AccessPointConfig ap_config;
   ap_config.ssid = "esp-core-demo";
   ap_config.channel = 6;
@@ -17,7 +24,7 @@ extern "C" void app_main(void) {
   auto config = earbrain::wifi().config();
   config.ap_config = ap_config;
 
-  esp_err_t err = earbrain::wifi().config(config);
+  err = earbrain::wifi().config(config);
   if (err != ESP_OK) {
     earbrain::logging::errorf(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
     return;
