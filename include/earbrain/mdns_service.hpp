@@ -5,16 +5,12 @@
 
 namespace earbrain {
 
-/**
- * @brief mDNS service configuration
- */
 struct MdnsConfig {
-  std::string hostname =
-      "esp-device"; ///< mDNS hostname (e.g., "esp-device.local")
-  std::string instance_name = "ESP Device"; ///< Human-readable instance name
-  std::string service_type = "_http"; ///< Service type (e.g., "_http", "_ftp")
-  std::string protocol = "_tcp";      ///< Protocol ("_tcp" or "_udp")
-  uint16_t port = 80;                 ///< Service port number
+  std::string hostname = "esp-device";
+  std::string instance_name = "ESP Device";
+  std::string service_type = "_http";
+  std::string protocol = "_tcp";
+  uint16_t port = 80;
 };
 
 class MdnsService {
@@ -34,7 +30,6 @@ public:
   const MdnsConfig &config() const noexcept { return mdns_config; }
 
 private:
-
   MdnsConfig mdns_config;
   bool initialized = false;
   bool service_registered = false;
